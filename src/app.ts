@@ -5,11 +5,16 @@ import * as db from "./db.js";
 
 const app = new Hono();
 
-// CORS & Preflight
+// CORS & Preflight (restringido al dominio oficial; localhost solo en dev)
+const ALLOWED_ORIGINS = new Set([
+  "https://electrotarifa.eugenioazurmendi.com.ar",
+  ...(process.env.BETTER_AUTH_URL?.startsWith("https://") ? [] : ["http://localhost:8000", "http://127.0.0.1:8000"]),
+]);
+
 app.use(
   "*",
   cors({
-    origin: (origin) => origin || "*",
+    origin: (origin) => (origin && ALLOWED_ORIGINS.has(origin) ? origin : "https://electrotarifa.eugenioazurmendi.com.ar"),
     allowHeaders: ["Content-Type", "Authorization", "Cookie"],
     allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     exposeHeaders: ["Set-Cookie"],
