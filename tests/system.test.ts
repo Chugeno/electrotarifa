@@ -161,25 +161,46 @@ describe("⚡ Suite de Pruebas: Sistema Multi-Proveedor con TypeScript & Better 
     console.log("  ✓ Aislamiento de presupuestos verificado: cada usuario solo ve sus propios presupuestos.");
   });
 
-  test("6. Integridad Absoluta del Carrito 'Vero'", async () => {
+  test("6. Carrito 'Vero' privado e intacto", async () => {
+    // Un invitado no puede ver ni exportar carritos de otro usuario
     const res = await fetch(`${BASE_URL}/api/carts/4`);
-    assert.strictEqual(res.status, 200, "Carrito Vero (ID 4) debe existir");
-    const veroCart = await res.json();
-    assert.strictEqual(veroCart.name, "Vero", "El nombre debe ser Vero");
-    assert.strictEqual(veroCart.items.length, 19, "Debe tener 19 artículos intactos");
-    assert.strictEqual(veroCart.total_amount, 1260415, "El total debe ser exactamente $ 1.260.415,00");
-    console.log(`  ✓ Carrito 'Vero' verificado: 19 ítems, total $ ${veroCart.total_amount.toLocaleString('es-AR')}.`);
+    assert.strictEqual(res.status, 404, "Un invitado no debe poder leer el carrito Vero");
+    const exp = await fetch(`${BASE_URL}/api/carts/4/export`);
+    assert.strictEqual(exp.status, 404, "Un invitado no debe poder exportar el carrito Vero");
+
+    // Integridad verificada directamente en la base local
+    const { createClient } = await import("@libsql/client");
+    const db = createClient({ url: "file:paternal.db" });
+    const r = await db.execute("SELECT COUNT(*) AS n, SUM(price*quantity) AS t FROM cart_items WHERE cart_id = 4");
+    assert.strictEqual(Number(r.rows[0].n), 19, "Debe tener 19 artículos intactos");
+    assert.strictEqual(Number(r.rows[0].t), 1260415, "El total debe ser exactamente $ 1.260.415,00");
+    console.log("  ✓ Carrito 'Vero' privado (404 para invitados) e intacto: 19 ítems.");
   });
 
-  test("7. Exportación a CSV con Formato Regional Argentino", async () => {
-    const res = await fetch(`${BASE_URL}/api/carts/4/export`);
-    assert.strictEqual(res.status, 200);
-    const text = await res.text();
+  test("7. Exportación CSV por proveedor (con y sin precios, formato AR)", async () => {
+    const cart = await (await fetch(`${BASE_URL}/api/carts`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "CSV Test" }),
+    })).json();
+    const add = (provider: string, price: number, quantity: number) =>
+      fetch(`${BASE_URL}/api/carts/${cart.id}/items`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider, product_id: Math.floor(Math.random() * 1e9), name: `Item ${provider}`, price, quantity }),
+      });
+    await add("Jalux", 1234.5, 2);
+    await add("Adma Distribuidora", 100, 3);
 
-    assert.ok(text.includes("Proveedor;SKU;Producto;Variante;Precio Unitario;Cantidad;Subtotal;Link"), "Debe tener cabeceras separadas por ';'");
-    assert.ok(text.includes("259517,00"), "Los decimales deben usar coma ','");
-    assert.ok(!text.includes("259517.00"), "No debe usar punto decimal en los números");
-    console.log("  ✓ Exportación CSV verificada con separador ';' y decimales con coma ','.");
+    const text = await (await fetch(`${BASE_URL}/api/carts/${cart.id}/export`)).text();
+    assert.ok(text.includes("Proveedor;SKU;Producto;Variante;Cantidad;Precio Unitario;Subtotal;Link"), "Cabeceras con ';'");
+    assert.ok(text.includes("2469,00"), "Decimales con coma");
+    assert.ok(!text.includes("2469.00"), "Sin punto decimal");
+    assert.ok(text.includes("SUBTOTAL Jalux") && text.includes("SUBTOTAL Adma Distribuidora"), "Subtotales por proveedor");
+    assert.ok(text.includes("2769,00"), "Total del carrito");
+
+    const noPrices = await (await fetch(`${BASE_URL}/api/carts/${cart.id}/export?prices=0`)).text();
+    assert.ok(!noPrices.includes("Precio") && !noPrices.includes("2469"), "Lista de materiales sin precios");
+
+    await fetch(`${BASE_URL}/api/carts/${cart.id}`, { method: "DELETE" });
+    console.log("  ✓ CSV con subtotales por proveedor, total, y versión sin precios.");
   });
 
   test("8. Servidor Web Frontend (HTML)", async () => {

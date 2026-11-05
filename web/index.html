@@ -110,6 +110,12 @@
               >
                 <span>Cerrar Sesión</span>
               </button>
+              <button 
+                @click="deleteAccount(); userMenuOpen = false;" 
+                class="w-full text-left px-3.5 py-2 text-[11px] text-slate-500 hover:bg-rose-50 hover:text-rose-700 transition flex items-center gap-2 border-t border-slate-100"
+              >
+                <span>🗑️ Eliminar mi cuenta</span>
+              </button>
             </div>
           </div>
         </template>
@@ -695,13 +701,20 @@
             >
               <span>＋</span> Crear nuevo carrito
             </button>
-            <button 
-              x-show="carts.length > 1"
-              @click="deleteCurrentCart()" 
-              class="text-rose-600 hover:text-rose-800 font-medium py-1"
-            >
-              Eliminar este carrito
-            </button>
+            <div class="flex items-center gap-3">
+              <button 
+                @click="renameCurrentCart()" 
+                class="text-slate-600 hover:text-slate-900 font-medium py-1"
+              >
+                ✏️ Renombrar
+              </button>
+              <button 
+                @click="deleteCurrentCart()" 
+                class="text-rose-600 hover:text-rose-800 font-medium py-1"
+              >
+                🗑️ Eliminar
+              </button>
+            </div>
           </div>
         </div>
 
@@ -754,10 +767,26 @@
 
         <!-- Drawer Footer -->
         <div class="p-4 sm:p-5 border-t border-slate-200 bg-slate-50 flex flex-col gap-2.5 shrink-0 safe-bottom">
+          <!-- Totales por proveedor -->
+          <div x-show="providerTotals().length > 1" class="flex flex-col gap-1 pb-2 border-b border-slate-200">
+            <template x-for="pt in providerTotals()" :key="pt.provider">
+              <div class="flex items-center justify-between text-xs">
+                <span class="flex items-center gap-1.5">
+                  <span class="text-[9px] font-bold px-1.5 rounded text-white" :class="getProviderBadgeClass(pt.provider)" x-text="pt.provider"></span>
+                  <span class="text-slate-500" x-text="pt.count + (pt.count === 1 ? ' ítem' : ' ítems')"></span>
+                </span>
+                <span class="font-semibold text-slate-700" x-text="formatCurrency(pt.total)"></span>
+              </div>
+            </template>
+          </div>
           <!-- Total -->
           <div class="flex items-baseline justify-between">
             <span class="text-xs font-bold uppercase tracking-wider text-slate-500">Total Presupuestado</span>
             <span class="text-xl sm:text-2xl font-black text-slate-900" x-text="formatCurrency(currentCart ? currentCart.total_amount : 0)"></span>
+          </div>
+          <div x-show="carts.length > 1" class="flex items-baseline justify-between text-xs text-slate-500 -mt-1">
+            <span x-text="'Total de los ' + carts.length + ' carritos'"></span>
+            <span class="font-bold text-slate-700" x-text="formatCurrency(carts.reduce((a, c) => a + c.total_amount, 0))"></span>
           </div>
 
           <!-- Actions -->
@@ -772,13 +801,27 @@
             </button>
 
             <div class="grid grid-cols-2 gap-2">
-              <a 
-                :href="'/api/carts/' + activeCartId + '/export'" 
-                :class="(!currentCart || currentCart.items.length === 0) ? 'pointer-events-none opacity-40' : ''"
-                class="py-2 px-3 text-center bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 font-semibold text-xs rounded-xl shadow-sm transition flex items-center justify-center gap-1"
-              >
-                <span>📥</span> Descargar Excel
-              </a>
+              <div class="relative" x-data="{ open: false }">
+                <button 
+                  @click="open = !open"
+                  :disabled="!currentCart || currentCart.items.length === 0"
+                  class="w-full py-2 px-3 text-center bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 disabled:opacity-40 font-semibold text-xs rounded-xl shadow-sm transition flex items-center justify-center gap-1"
+                >
+                  <span>📥</span> Exportar Excel ▾
+                </button>
+                <div x-show="open" @click.away="open = false" x-cloak class="absolute bottom-full mb-1.5 left-0 w-60 bg-white rounded-xl shadow-xl border border-slate-200 py-1.5 z-50 text-xs">
+                  <p class="px-3 py-1 text-[10px] font-bold uppercase text-slate-400">Este carrito (agrupado por proveedor)</p>
+                  <a @click="open = false" :href="'/api/carts/' + activeCartId + '/export'" class="block px-3 py-1.5 hover:bg-slate-100">💲 Con precios y totales</a>
+                  <a @click="open = false" :href="'/api/carts/' + activeCartId + '/export?prices=0'" class="block px-3 py-1.5 hover:bg-slate-100">📋 Lista de materiales sin precios</a>
+                  <template x-if="carts.length > 1">
+                    <div class="border-t border-slate-100 mt-1 pt-1">
+                      <p class="px-3 py-1 text-[10px] font-bold uppercase text-slate-400">Todos mis carritos</p>
+                      <a @click="open = false" href="/api/carts/export-all" class="block px-3 py-1.5 hover:bg-slate-100">💲 Con precios y totales</a>
+                      <a @click="open = false" href="/api/carts/export-all?prices=0" class="block px-3 py-1.5 hover:bg-slate-100">📋 Lista de materiales sin precios</a>
+                    </div>
+                  </template>
+                </div>
+              </div>
               <button 
                 @click="clearCurrentCart()" 
                 :disabled="!currentCart || currentCart.items.length === 0"
@@ -1205,6 +1248,51 @@
           }
         },
 
+        providerTotals() {
+          const map = {};
+          for (const it of (this.currentCart?.items || [])) {
+            const p = it.provider || 'Paternal SRL';
+            map[p] = map[p] || { provider: p, total: 0, count: 0 };
+            map[p].total += it.price * it.quantity;
+            map[p].count += 1;
+          }
+          return Object.values(map).sort((a, b) => b.total - a.total);
+        },
+
+        async renameCurrentCart() {
+          const current = this.getActiveCartName();
+          const name = prompt('Nuevo nombre del carrito:', current);
+          if (!name || !name.trim() || name.trim() === current) return;
+          const res = await fetch(`/api/carts/${this.activeCartId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name.trim() })
+          });
+          if (!res.ok) return alert('No se pudo renombrar el carrito');
+          await this.loadCarts();
+          this.showToast('Carrito renombrado', '✏️');
+        },
+
+        async deleteAccount() {
+          if (!confirm('¿Eliminar tu cuenta de forma permanente?\n\nSe borrarán también todos tus carritos. Esta acción no se puede deshacer.')) return;
+          const password = prompt('Para confirmar, ingresá tu contraseña:');
+          if (!password) return;
+          const res = await fetch('/api/auth/delete-user', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ password })
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            return alert('No se pudo eliminar la cuenta: ' + (err.message || 'contraseña incorrecta'));
+          }
+          this.currentUser = null;
+          this.activeCartId = null;
+          this.showToast('Cuenta eliminada', '👋');
+          await this.loadCarts();
+        },
+
         async deleteCurrentCart() {
           if (!confirm(`¿Eliminar el carrito "${this.getActiveCartName()}"?`)) return;
           try {
@@ -1250,7 +1338,7 @@
 
         async removeCartItem(itemId) {
           try {
-            await fetch(`/api/carts/items/${itemId}`, { method: 'DELETE' });
+            await fetch(`/api/carts/${this.activeCartId}/items/${itemId}`, { method: 'DELETE' });
             await this.loadActiveCart();
             await this.loadCarts();
           } catch (e) {
@@ -1278,16 +1366,22 @@
           text += `Fecha: ${date}\n`;
           text += `------------------------------------\n`;
           
-          this.currentCart.items.forEach((item, idx) => {
-            const sub = item.price * item.quantity;
-            const prov = item.provider ? `[${item.provider}] ` : '';
-            text += `${idx + 1}. *${prov}${item.name}*\n`;
-            if (item.variant_label) text += `   Variante: ${item.variant_label}\n`;
-            if (item.sku) text += `   SKU: ${item.sku}\n`;
-            text += `   Cant: ${item.quantity} x ${this.formatCurrency(item.price)} = *${this.formatCurrency(sub)}*\n`;
-            if (item.image_url) text += `   Foto: ${item.image_url}\n`;
-            text += `\n`;
-          });
+          const groups = {};
+          this.currentCart.items.forEach(it => (groups[it.provider || 'Paternal SRL'] ||= []).push(it));
+          let idx = 0;
+          for (const [prov, items] of Object.entries(groups)) {
+            text += `\n🏬 *${prov.toUpperCase()}*\n`;
+            let provTotal = 0;
+            items.forEach(item => {
+              const sub = item.price * item.quantity;
+              provTotal += sub;
+              text += `${++idx}. *${item.name}*\n`;
+              if (item.variant_label) text += `   Variante: ${item.variant_label}\n`;
+              if (item.sku) text += `   SKU: ${item.sku}\n`;
+              text += `   Cant: ${item.quantity} x ${this.formatCurrency(item.price)} = *${this.formatCurrency(sub)}*\n`;
+            });
+            text += `   ➤ Subtotal ${prov}: *${this.formatCurrency(provTotal)}*\n`;
+          }
 
           text += `------------------------------------\n`;
           text += `*TOTAL ESTIMADO: ${this.formatCurrency(this.currentCart.total_amount)}*\n`;

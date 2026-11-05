@@ -292,24 +292,32 @@ export async function createCart(name: string, userId?: string | null) {
   return { id: cartId, name: name.trim(), user_id: userId || null, item_count: 0, total_amount: 0 };
 }
 
-export async function deleteCart(cartId: number, userId?: string | null) {
-  let countSql = "SELECT COUNT(*) as cnt FROM carts WHERE 1=1";
-  const countParams: any[] = [];
-  if (userId) {
-    countSql += " AND user_id = ?";
-    countParams.push(userId);
-  } else {
-    countSql += " AND user_id IS NULL";
-  }
-  const countRes = await client.execute({ sql: countSql, args: countParams });
-  const total = Number(countRes.rows[0]?.cnt || 0);
-  if (total <= 1) return false;
+export async function getCartOwner(cartId: number): Promise<string | null | undefined> {
+  const res = await client.execute({ sql: "SELECT user_id FROM carts WHERE id = ?", args: [cartId] });
+  if (res.rows.length === 0) return undefined;
+  return res.rows[0].user_id ? String(res.rows[0].user_id) : null;
+}
 
-  await client.execute({
-    sql: "DELETE FROM carts WHERE id = ?",
-    args: [cartId],
-  });
+// Si se borra el último carrito, listCarts() crea uno vacío automáticamente.
+export async function deleteCart(cartId: number) {
+  await client.batch(
+    [
+      { sql: "DELETE FROM cart_items WHERE cart_id = ?", args: [cartId] },
+      { sql: "DELETE FROM carts WHERE id = ?", args: [cartId] },
+    ],
+    "write"
+  );
   return true;
+}
+
+export async function deleteUserCarts(userId: string) {
+  await client.batch(
+    [
+      { sql: "DELETE FROM cart_items WHERE cart_id IN (SELECT id FROM carts WHERE user_id = ?)", args: [userId] },
+      { sql: "DELETE FROM carts WHERE user_id = ?", args: [userId] },
+    ],
+    "write"
+  );
 }
 
 export async function renameCart(cartId: number, newName: string) {

@@ -31,6 +31,16 @@ export const auth = betterAuth({
   ],
   // En producción BETTER_AUTH_SECRET es obligatorio (wrangler secret put BETTER_AUTH_SECRET).
   secret: process.env.BETTER_AUTH_SECRET || (process.env.DATABASE_URL?.startsWith("libsql://") ? undefined : "dev-only-local-secret"),
+  user: {
+    // Permite que cada usuario elimine su cuenta (POST /api/auth/delete-user con { password }).
+    deleteUser: {
+      enabled: true,
+      beforeDelete: async (user) => {
+        const { deleteUserCarts } = await import("./db.js");
+        await deleteUserCarts(user.id);
+      },
+    },
+  },
   emailAndPassword: {
     enabled: true,
     requireEmailVerification: false,
