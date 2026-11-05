@@ -14,5 +14,5 @@ routes = [
 
 [vars]
 BETTER_AUTH_URL = "https://electrotarifa.eugenioazurmendi.com.ar"
-# DATABASE_URL va en vars cuando tengamos la URL de Turso (no es secreta).
+DATABASE_URL = "libsql://electrotarifa-eugenioazurmendi.aws-us-east-1.turso.io"
 # Secretos (NO van aquí): npx wrangler secret put DATABASE_AUTH_TOKEN / BETTER_AUTH_SECRET
