@@ -1,0 +1,9 @@
+[Unit]
+Description=ElectroTarifa: actualización diaria 05:00 ART
+
+[Timer]
+OnCalendar=*-*-* 05:00:00 America/Argentina/Buenos_Aires
+Persistent=true
+
+[Install]
+WantedBy=timers.target

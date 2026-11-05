@@ -1,0 +1,10 @@
+[Unit]
+Description=ElectroTarifa: scraping diario de proveedores y sync a Turso
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/eugenio/tarifas-proveedores
+Environment=PATH=/usr/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/eugenio/tarifas-proveedores/scripts/actualizar-diario.sh
+ExecStopPost=/bin/sh -c 'if [ "$SERVICE_RESULT" != "success" ]; then curl -s -d "❌ ElectroTarifa: falló la actualización diaria" https://ntfy.sh/eugenio-bamzUf-2dijqy-gahtan; fi'

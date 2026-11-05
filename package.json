@@ -1,0 +1,35 @@
+{
+  "name": "electrotarifa",
+  "version": "1.0.0",
+  "description": "Sistema local para scraping, almacenamiento en base de datos ultra rápida (SQLite con FTS5 Trigram), comparación de precios entre proveedores y aplicación web interactiva con presupuestos multi-proveedor, scroll infinito, exportación CSV para Argentina y visualización de **doble precio** (Final c/IVA + Neto discriminado).",
+  "main": "src/server.ts",
+  "type": "commonjs",
+  "scripts": {
+    "start": "tsx src/server.ts",
+    "dev": "tsx watch src/server.ts",
+    "migrate": "better-auth migrate --config src/auth.ts --yes",
+    "test": "tsx --test tests/system.test.ts",
+    "deploy": "wrangler deploy",
+    "sync": "tsx scripts/sync-to-turso.ts",
+    "sync:full": "tsx scripts/sync-to-turso.ts --full"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@hono/node-server": "^2.1.6",
+    "@libsql/client": "^0.18.0",
+    "@libsql/kysely-libsql": "^0.4.1",
+    "better-auth": "^1.7.18",
+    "dotenv": "^18.0.9",
+    "hono": "^4.13.16",
+    "kysely": "^0.29.8"
+  },
+  "devDependencies": {
+    "@better-auth/cli": "^1.4.22",
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.158.0"
+  }
+}

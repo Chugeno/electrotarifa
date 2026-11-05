@@ -1,0 +1,1305 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Buscador Multi-Proveedor de Precios y Presupuestos</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eff6ff',
+              100: '#dbeafe',
+              500: '#3b82f6',
+              600: '#2563eb',
+              700: '#1d4ed8',
+              800: '#1e40af',
+              900: '#1e3a8a',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    [v-cloak] { display: none; }
+    .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+  </style>
+  <!-- Alpine.js -->
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.5/dist/cdn.min.js"></script>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col font-sans" x-data="paternalApp()" x-init="init()" v-cloak>
+
+  <!-- HEADER -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
+      <!-- Logo / Title -->
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-brand-600 via-indigo-600 to-amber-500 flex items-center justify-center text-white font-bold shadow-md shadow-blue-500/20 text-lg">
+          ⚡
+        </div>
+        <!-- Subtitle & Provider badges counter -->
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="font-bold text-base sm:text-lg text-slate-900 leading-tight">Tarifas Proveedores</h1>
+            <span class="text-[10px] sm:text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200" x-text="totalCatalogAll ? totalCatalogAll.toLocaleString('es-AR') + ' productos' : 'Catálogo Local'"></span>
+          </div>
+          <p class="text-[10px] sm:text-xs text-slate-500 truncate max-w-[200px] sm:max-w-none">5 Proveedores Conectados</p>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="flex items-center gap-2 sm:gap-3">
+        <!-- Selector rápido de Carrito activo -->
+        <div class="relative hidden sm:block">
+          <select 
+            x-model="activeCartId" 
+            @change="loadActiveCart()" 
+            class="bg-slate-100 hover:bg-slate-200/70 border border-slate-300 text-slate-800 text-xs font-medium rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-brand-500 transition cursor-pointer"
+          >
+            <template x-for="c in carts" :key="c.id">
+              <option :value="c.id" x-text="c.name + ' (' + c.item_count + ')'"></option>
+            </template>
+          </select>
+        </div>
+
+        <button 
+          @click="openNewCartModal = true" 
+          class="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg shadow-sm transition"
+          title="Crear un nuevo carrito / presupuesto"
+        >
+          <span>＋</span> Nuevo
+        </button>
+
+        <!-- User Auth Button / Menu -->
+        <template x-if="currentUser">
+          <div class="relative" x-data="{ userMenuOpen: false }">
+            <button 
+              @click="userMenuOpen = !userMenuOpen"
+              class="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg shadow-sm transition"
+              title="Tu cuenta de usuario"
+            >
+              <span class="w-5 h-5 rounded-full bg-brand-100 text-brand-700 font-bold flex items-center justify-center text-[10px]" x-text="currentUser.name ? currentUser.name[0].toUpperCase() : 'U'"></span>
+              <span class="hidden md:inline max-w-[110px] truncate" x-text="currentUser.name || currentUser.email"></span>
+              <svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+              </svg>
+            </button>
+            <div 
+              x-show="userMenuOpen" 
+              @click.away="userMenuOpen = false" 
+              x-cloak
+              class="absolute right-0 mt-1.5 w-52 bg-white rounded-xl shadow-xl border border-slate-200 py-1.5 z-40"
+            >
+              <div class="px-3.5 py-2 border-b border-slate-100">
+                <p class="text-xs font-bold text-slate-900 truncate" x-text="currentUser.name || 'Usuario'"></p>
+                <p class="text-[11px] text-slate-500 truncate" x-text="currentUser.email"></p>
+                <span class="inline-block mt-1 text-[9px] bg-emerald-50 text-emerald-700 font-semibold px-1.5 py-0.5 rounded">🔒 Cifrado Zero-Knowledge</span>
+              </div>
+              <button 
+                @click="logout(); userMenuOpen = false;" 
+                class="w-full text-left px-3.5 py-2 text-xs text-rose-600 hover:bg-rose-50 font-medium transition flex items-center gap-2"
+              >
+                <span>Cerrar Sesión</span>
+              </button>
+            </div>
+          </div>
+        </template>
+
+        <template x-if="!currentUser">
+          <button 
+            @click="authModalOpen = true"
+            class="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg shadow-sm transition"
+            title="Iniciar sesión o registrarte"
+          >
+            <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
+            </svg>
+            <span class="hidden sm:inline">Ingresar</span>
+          </button>
+        </template>
+
+        <!-- Botón Ver Carrito Drawer -->
+        <button 
+          @click="cartDrawerOpen = true" 
+          class="relative inline-flex items-center gap-2 px-3 sm:px-4 py-2 text-xs sm:text-sm font-semibold text-white bg-brand-600 hover:bg-brand-700 active:bg-brand-800 rounded-lg shadow-md shadow-brand-500/20 transition"
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path>
+          </svg>
+          <span class="hidden sm:inline">Presupuesto</span>
+          <span class="bg-blue-400/40 text-white font-bold px-1.5 py-0.5 rounded-full text-xs" x-text="currentCart ? currentCart.items.length : 0"></span>
+          <span class="font-bold border-l border-blue-400/40 pl-2 hidden md:inline" x-text="formatCurrency(currentCart ? currentCart.total_amount : 0)"></span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- STICKY CONTROL PANEL (ALWAYS VISIBLE ON SCROLL) -->
+  <div class="sticky top-16 z-20 bg-slate-50/95 backdrop-blur-md border-b border-slate-200/80 shadow-sm transition-all">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex flex-col gap-3">
+
+      <!-- PROVIDER SELECTOR TABS -->
+      <div class="flex items-center gap-2 overflow-x-auto pb-0.5 custom-scrollbar">
+        <button 
+          @click="setProvider('')" 
+          class="px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-bold transition flex items-center gap-1.5 border shadow-xs"
+          :class="selectedProvider === '' ? 'bg-slate-900 text-white border-slate-900 shadow-slate-900/10' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'"
+        >
+          <span>Todos los Proveedores</span>
+          <span class="text-[10px] px-1.5 py-0.2 rounded-md font-semibold" :class="selectedProvider === '' ? 'bg-slate-700 text-slate-200' : 'bg-slate-100 text-slate-600'" x-text="totalCatalogAll.toLocaleString('es-AR')"></span>
+        </button>
+
+        <button 
+          @click="setProvider('Paternal SRL')" 
+          class="px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-bold transition flex items-center gap-1.5 border shadow-xs"
+          :class="selectedProvider === 'Paternal SRL' ? 'bg-blue-600 text-white border-blue-600 shadow-blue-500/20' : 'bg-white text-blue-700 border-blue-200 hover:bg-blue-50/50'"
+        >
+          <span class="w-2 h-2 rounded-full" :class="selectedProvider === 'Paternal SRL' ? 'bg-white' : 'bg-blue-500'"></span>
+          <span>Paternal SRL</span>
+          <span class="text-[10px] px-1.5 py-0.2 rounded-md font-semibold" :class="selectedProvider === 'Paternal SRL' ? 'bg-blue-700 text-white' : 'bg-blue-100 text-blue-800'" x-text="getProviderCount('Paternal SRL')"></span>
+        </button>
+
+        <button 
+          @click="setProvider('Electro Tucumán')" 
+          class="px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-bold transition flex items-center gap-1.5 border shadow-xs"
+          :class="selectedProvider === 'Electro Tucumán' ? 'bg-amber-600 text-white border-amber-600 shadow-amber-500/20' : 'bg-white text-amber-700 border-amber-200 hover:bg-amber-50/50'"
+        >
+          <span class="w-2 h-2 rounded-full" :class="selectedProvider === 'Electro Tucumán' ? 'bg-white' : 'bg-amber-500'"></span>
+          <span>Electro Tucumán</span>
+          <span class="text-[10px] px-1.5 py-0.2 rounded-md font-semibold" :class="selectedProvider === 'Electro Tucumán' ? 'bg-amber-700 text-white' : 'bg-amber-100 text-amber-900'" x-text="getProviderCount('Electro Tucumán')"></span>
+        </button>
+
+        <button 
+          @click="setProvider('Electrocity')" 
+          class="px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-bold transition flex items-center gap-1.5 border shadow-xs"
+          :class="selectedProvider === 'Electrocity' ? 'bg-purple-600 text-white border-purple-600 shadow-purple-500/20' : 'bg-white text-purple-700 border-purple-200 hover:bg-purple-50/50'"
+        >
+          <span class="w-2 h-2 rounded-full" :class="selectedProvider === 'Electrocity' ? 'bg-white' : 'bg-purple-500'"></span>
+          <span>Electrocity</span>
+          <span class="text-[10px] px-1.5 py-0.2 rounded-md font-semibold" :class="selectedProvider === 'Electrocity' ? 'bg-purple-700 text-white' : 'bg-purple-100 text-purple-900'" x-text="getProviderCount('Electrocity')"></span>
+        </button>
+
+        <button 
+          @click="setProvider('Jalux')" 
+          class="px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-bold transition flex items-center gap-1.5 border shadow-xs"
+          :class="selectedProvider === 'Jalux' ? 'bg-red-600 text-white border-red-600 shadow-red-500/20' : 'bg-white text-red-700 border-red-200 hover:bg-red-50/50'"
+        >
+          <span class="w-2 h-2 rounded-full" :class="selectedProvider === 'Jalux' ? 'bg-white' : 'bg-red-500'"></span>
+          <span>Jalux</span>
+          <span class="text-[10px] px-1.5 py-0.2 rounded-md font-semibold" :class="selectedProvider === 'Jalux' ? 'bg-red-700 text-white' : 'bg-red-100 text-red-900'" x-text="getProviderCount('Jalux')"></span>
+        </button>
+
+        <button 
+          @click="setProvider('Adma Distribuidora')" 
+          class="px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-bold transition flex items-center gap-1.5 border shadow-xs"
+          :class="selectedProvider === 'Adma Distribuidora' ? 'bg-emerald-600 text-white border-emerald-600 shadow-emerald-500/20' : 'bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50/50'"
+        >
+          <span class="w-2 h-2 rounded-full" :class="selectedProvider === 'Adma Distribuidora' ? 'bg-white' : 'bg-emerald-500'"></span>
+          <span>Adma</span>
+          <span class="text-[10px] px-1.5 py-0.2 rounded-md font-semibold" :class="selectedProvider === 'Adma Distribuidora' ? 'bg-emerald-700 text-white' : 'bg-emerald-100 text-emerald-900'" x-text="getProviderCount('Adma Distribuidora')"></span>
+        </button>
+      </div>
+
+      <!-- SEARCH & FILTER BAR -->
+      <div class="bg-white p-2.5 sm:p-3 rounded-2xl shadow-sm border border-slate-200 flex flex-col sm:flex-row gap-2.5">
+        <!-- Search Input -->
+        <div class="relative flex-1">
+          <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+            <svg class="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+            </svg>
+          </div>
+          <input 
+            type="text" 
+            x-model="searchQuery" 
+            @input.debounce.250ms="performSearch(1)" 
+            placeholder="Buscar producto, SKU, marca, medidas (ej. 'cable 4mm', 'termica 16', 'sonoff', '2368')..."
+            class="w-full pl-9 sm:pl-10 pr-9 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 placeholder-slate-400 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:bg-white transition"
+            autofocus
+          />
+          <button 
+            x-show="searchQuery.length > 0" 
+            @click="searchQuery = ''; performSearch(1)" 
+            class="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 text-sm"
+          >
+            ✕
+          </button>
+        </div>
+
+        <!-- Category Filter -->
+        <div class="sm:w-64">
+          <select 
+            x-model="selectedCategory" 
+            @change="performSearch(1)" 
+            class="w-full py-2 px-3 bg-slate-50 border border-slate-300 rounded-xl text-slate-700 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:bg-white transition"
+          >
+            <option value="">Todas las categorías</option>
+            <template x-for="cat in categories" :key="cat">
+              <option :value="cat" x-text="cat"></option>
+            </template>
+          </select>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- MAIN CONTENT -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 flex-1 w-full flex flex-col gap-5">
+
+    <!-- STATUS / RESULTS INFO -->
+    <div class="flex items-center justify-between text-xs sm:text-sm text-slate-500 px-1">
+      <div>
+        <template x-if="loading">
+          <span class="inline-flex items-center gap-2 text-brand-600 font-medium">
+            <svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+            </svg>
+            Buscando productos...
+          </span>
+        </template>
+        <template x-if="!loading">
+          <span>
+            Mostrando <strong class="text-slate-700" x-text="products.length"></strong> de <strong class="text-slate-700" x-text="totalResults.toLocaleString('es-AR')"></strong> productos
+            <span x-show="selectedProvider"> en <strong class="text-slate-800" x-text="selectedProvider"></strong></span>
+            <span x-show="searchQuery"> para "<strong class="text-slate-800" x-text="searchQuery"></strong>"</span>
+          </span>
+        </template>
+      </div>
+      <div class="text-xs text-slate-400 hidden sm:block">
+        Ordenados por mejor precio
+      </div>
+    </div>
+
+    <!-- PRODUCTS GRID -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-5">
+      <template x-for="p in products" :key="p.uid">
+        <div class="bg-white rounded-2xl border border-slate-200/90 shadow-sm hover:shadow-md hover:border-slate-300 transition-all flex flex-col overflow-hidden group">
+          
+          <!-- Image Container -->
+          <div class="relative bg-slate-100 aspect-square w-full overflow-hidden flex items-center justify-center p-3 cursor-pointer" @click="openProductModal(p)">
+            <template x-if="p.image_url">
+              <img 
+                :src="p.image_url" 
+                :alt="p.name" 
+                loading="lazy" 
+                class="w-full h-full object-contain mix-blend-multiply group-hover:scale-105 transition-transform duration-300"
+                onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
+              />
+            </template>
+            <div class="hidden w-full h-full items-center justify-center text-slate-400 text-3xl font-light">
+              📦
+            </div>
+            
+            <!-- Provider Badge -->
+            <span 
+              class="absolute top-2.5 left-2.5 text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm backdrop-blur-sm"
+              :class="getProviderBadgeClass(p.provider, true)"
+              x-text="p.provider"
+            ></span>
+
+            <!-- Stock Badge -->
+            <span 
+              class="absolute top-2.5 right-2.5 text-[10px] font-semibold px-2 py-0.5 rounded-full backdrop-blur-sm shadow-sm"
+              :class="p.is_in_stock ? 'bg-emerald-500/90 text-white' : 'bg-rose-500/90 text-white'"
+              x-text="p.is_in_stock ? 'En Stock' : 'Sin Stock'"
+            ></span>
+          </div>
+
+          <!-- Card Body -->
+          <div class="p-4 flex-1 flex flex-col justify-between">
+            <div>
+              <!-- SKU, Brand & Category -->
+              <div class="flex items-center justify-between text-[11px] text-slate-400 mb-1.5">
+                <span class="font-mono bg-slate-100 px-1.5 py-0.5 rounded text-slate-600" x-text="p.sku ? 'SKU: ' + p.sku : 'ID: ' + p.id"></span>
+                <span x-show="p.brand" class="font-bold text-slate-600 truncate max-w-[100px]" x-text="p.brand"></span>
+                <span x-show="!p.brand" class="truncate max-w-[130px]" x-text="p.categories_text.split(' | ')[0] || ''"></span>
+              </div>
+
+              <!-- Product Name -->
+              <h3 
+                class="font-semibold text-slate-800 text-sm line-clamp-2 leading-snug cursor-pointer hover:text-brand-600 transition mb-2" 
+                @click="openProductModal(p)"
+                :title="p.name"
+                x-text="p.name"
+              ></h3>
+            </div>
+
+            <!-- Price & Actions -->
+            <div class="mt-3 pt-3 border-t border-slate-100 flex items-end justify-between gap-2">
+              <div>
+                <div class="text-[9px] uppercase font-bold text-slate-400">Precio Final (c/IVA)</div>
+                <div class="text-lg font-black text-slate-900 leading-tight">
+                  <span x-text="p.price > 0 ? formatCurrency(p.price) : 'Consultar precio'"></span>
+                </div>
+                <div x-show="p.price_neto" class="text-[11px] font-medium text-slate-500 mt-0.5">
+                  <span>Neto: </span><span class="font-semibold text-slate-700" x-text="formatCurrency(p.price_neto)"></span>
+                  <span class="text-[9px] text-slate-400 font-semibold" x-text="'+ IVA ' + (p.iva_rate || 21) + '%'"></span>
+                </div>
+              </div>
+
+              <div class="flex items-center gap-1.5">
+                <!-- Info Button -->
+                <button 
+                  @click="openProductModal(p)" 
+                  class="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition"
+                  title="Ver ficha técnica"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                  </svg>
+                </button>
+
+                <!-- Add Button -->
+                <button 
+                  @click="handleQuickAdd(p)" 
+                  class="px-2.5 py-1.5 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 active:bg-brand-800 rounded-lg shadow-sm transition flex items-center gap-1"
+                >
+                  <span>＋</span>
+                  <span class="hidden sm:inline">Agregar</span>
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <!-- EMPTY STATE -->
+    <template x-if="!loading && products.length === 0">
+      <div class="text-center py-16 bg-white rounded-2xl border border-dashed border-slate-300 p-8">
+        <div class="text-4xl mb-3">🔍</div>
+        <h3 class="font-bold text-slate-800 text-base mb-1">No se encontraron productos</h3>
+        <p class="text-sm text-slate-500 max-w-md mx-auto">
+          Prueba buscando con otros términos, un código SKU diferente o seleccionando "Todos los Proveedores".
+        </p>
+      </div>
+    </template>
+
+    <!-- INFINITE SCROLL LOADER & END INDICATOR -->
+    <div class="py-6 flex flex-col items-center justify-center gap-2">
+      <div x-show="loadingMore" class="flex items-center gap-2 text-brand-600 font-semibold text-xs sm:text-sm py-2">
+        <svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+        </svg>
+        <span>Cargando más productos...</span>
+      </div>
+
+      <div x-show="!loading && !loadingMore && products.length > 0 && currentPage >= totalPages" class="text-center text-xs text-slate-400 py-3">
+        ✓ Has llegado al final &bull; Mostrando todos los <strong class="text-slate-600" x-text="products.length"></strong> productos encontrados
+      </div>
+
+      <!-- Sentinel para trigger de carga infinita -->
+      <div id="scroll-sentinel" class="w-full h-8"></div>
+    </div>
+  </main>
+
+  <!-- BOTÓN FLOTANTE VOLVER ARRIBA -->
+  <button 
+    x-show="scrolledDown" 
+    @click="window.scrollTo({top: 0, behavior: 'smooth'})" 
+    class="fixed bottom-6 left-6 z-40 bg-white/95 hover:bg-white text-slate-700 px-3.5 py-2.5 rounded-full shadow-xl border border-slate-200 transition-all flex items-center gap-1.5 text-xs font-semibold backdrop-blur-sm"
+    x-transition
+  >
+    <span>↑</span>
+    <span>Volver arriba</span>
+  </button>
+
+  <!-- MODAL: AUTHENTICATION (LOGIN / REGISTER) -->
+  <div 
+    x-show="authModalOpen" 
+    x-cloak 
+    class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+    @keydown.escape.window="authModalOpen = false"
+  >
+    <div 
+      @click.away="authModalOpen = false"
+      class="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border border-slate-200"
+    >
+      <!-- Modal Header -->
+      <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+        <div>
+          <h3 class="text-base font-bold text-slate-900" x-text="authTab === 'login' ? 'Iniciar Sesión' : 'Crear Cuenta'"></h3>
+          <p class="text-xs text-slate-500">Tus presupuestos guardados y seguros en tu cuenta</p>
+        </div>
+        <button @click="authModalOpen = false" class="text-slate-400 hover:text-slate-700 text-lg font-bold">✕</button>
+      </div>
+
+      <!-- Tabs -->
+      <div class="flex border-b border-slate-200">
+        <button 
+          type="button"
+          @click="authTab = 'login'; authError = '';" 
+          class="flex-1 py-3 text-xs font-bold transition text-center border-b-2"
+          :class="authTab === 'login' ? 'border-brand-600 text-brand-600 bg-brand-50/30' : 'border-transparent text-slate-500 hover:text-slate-700'"
+        >
+          Iniciar Sesión
+        </button>
+        <button 
+          type="button"
+          @click="authTab = 'register'; authError = '';" 
+          class="flex-1 py-3 text-xs font-bold transition text-center border-b-2"
+          :class="authTab === 'register' ? 'border-brand-600 text-brand-600 bg-brand-50/30' : 'border-transparent text-slate-500 hover:text-slate-700'"
+        >
+          Crear Cuenta
+        </button>
+      </div>
+
+      <!-- Form Body -->
+      <form @submit.prevent="submitAuth" class="p-6 flex flex-col gap-4">
+        <div x-show="authError" class="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs font-medium" x-text="authError"></div>
+
+        <template x-if="authTab === 'register'">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Nombre</label>
+            <input 
+              type="text" 
+              x-model="authForm.name" 
+              placeholder="Tu nombre o empresa"
+              required
+              class="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none"
+            >
+          </div>
+        </template>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">Correo Electrónico</label>
+          <input 
+            type="email" 
+            x-model="authForm.email" 
+            placeholder="ejemplo@correo.com"
+            required
+            class="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none"
+          >
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">Contraseña</label>
+          <input 
+            type="password" 
+            x-model="authForm.password" 
+            placeholder="••••••••"
+            required
+            minlength="8"
+            class="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none"
+          >
+          <span class="text-[10px] text-slate-400 mt-0.5 block">Mínimo 8 caracteres (cifrado irreversible con sal)</span>
+        </div>
+
+        <button 
+          type="submit" 
+          :disabled="authLoading"
+          class="w-full mt-2 py-2.5 px-4 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-xl text-sm transition shadow-md shadow-brand-500/20 disabled:opacity-50 flex items-center justify-center gap-2"
+        >
+          <span x-show="!authLoading" x-text="authTab === 'login' ? 'Ingresar a mi cuenta' : 'Crear mi cuenta'"></span>
+          <span x-show="authLoading" class="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: PRODUCT DETAIL & VARIANTS -->
+  <div 
+    x-show="modalOpen" 
+    class="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5"
+    x-transition.opacity
+  >
+    <div 
+      @click.away="modalOpen = false" 
+      class="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col overflow-hidden border border-slate-200"
+    >
+      <!-- Modal Header -->
+      <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+        <div class="flex items-center gap-2">
+          <span 
+            class="text-xs font-bold px-2 py-0.5 rounded text-white" 
+            :class="getProviderBadgeClass(modalProduct?.provider)"
+            x-text="modalProduct?.provider"
+          ></span>
+          <span class="text-xs font-mono bg-slate-200 text-slate-700 px-2 py-0.5 rounded font-semibold" x-text="modalProduct ? (modalProduct.sku ? 'SKU: ' + modalProduct.sku : 'ID: ' + modalProduct.id) : ''"></span>
+          <span class="text-xs text-slate-500 truncate max-w-xs" x-text="modalProduct ? modalProduct.categories_text : ''"></span>
+        </div>
+        <button @click="modalOpen = false" class="text-slate-400 hover:text-slate-700 text-xl font-bold p-1">✕</button>
+      </div>
+
+      <!-- Modal Body -->
+      <div class="p-6 overflow-y-auto custom-scrollbar flex-1 flex flex-col md:flex-row gap-6" x-show="modalProduct">
+        <!-- Image & Gallery -->
+        <div class="md:w-1/2 flex flex-col items-center">
+          <div class="w-full aspect-square bg-slate-100 rounded-xl overflow-hidden p-4 flex items-center justify-center border border-slate-200">
+            <img 
+              :src="modalActiveImage || modalProduct?.image_url" 
+              :alt="modalProduct?.name" 
+              class="max-w-full max-h-full object-contain mix-blend-multiply"
+            />
+          </div>
+          <!-- Gallery thumbnails if > 1 -->
+          <div class="flex gap-2 mt-3 overflow-x-auto w-full py-1 custom-scrollbar" x-show="modalProduct?.images && modalProduct.images.length > 1">
+            <template x-for="img in modalProduct?.images" :key="img.id || img.src">
+              <button 
+                @click="modalActiveImage = img.src" 
+                class="w-14 h-14 rounded-lg border bg-slate-50 overflow-hidden flex-shrink-0 p-1 transition"
+                :class="modalActiveImage === img.src ? 'border-brand-600 ring-2 ring-brand-400/40' : 'border-slate-200 opacity-70 hover:opacity-100'"
+              >
+                <img :src="img.src" class="w-full h-full object-contain mix-blend-multiply" />
+              </button>
+            </template>
+          </div>
+          <!-- Link to Web -->
+          <a 
+            :href="modalProduct?.permalink" 
+            target="_blank" 
+            rel="noopener noreferrer" 
+            class="mt-4 text-xs text-brand-600 hover:text-brand-800 hover:underline flex items-center gap-1"
+          >
+            Ver en sitio web oficial (<span x-text="modalProduct?.provider"></span>) ↗
+          </a>
+        </div>
+
+        <!-- Info & Actions -->
+        <div class="md:w-1/2 flex flex-col justify-between">
+          <div>
+            <div x-show="modalProduct?.brand" class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1" x-text="'Marca: ' + modalProduct?.brand"></div>
+            <h2 class="text-lg font-bold text-slate-900 leading-snug mb-3" x-text="modalProduct?.name"></h2>
+
+            <!-- Price -->
+            <div class="mb-4 bg-slate-50 p-3.5 rounded-xl border border-slate-200 flex items-baseline justify-between">
+              <div>
+                <span class="text-xs text-slate-500 font-semibold uppercase tracking-wider block">Precio Final (c/IVA)</span>
+                <span class="text-2xl font-black text-slate-900" x-text="(modalSelectedPrice || modalProduct?.price) > 0 ? formatCurrency(modalSelectedPrice || modalProduct?.price) : 'Consultar precio'"></span>
+                <div x-show="modalProduct?.price_neto" class="text-xs font-medium text-slate-600 mt-1">
+                  <span>Neto sin IVA: </span><span class="font-bold text-slate-800" x-text="formatCurrency(modalProduct?.price_neto)"></span>
+                  <span class="text-[11px] bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded ml-1 font-semibold" x-text="'IVA ' + (modalProduct?.iva_rate || 21) + '%: ' + formatCurrency(modalProduct?.iva_amount)"></span>
+                </div>
+              </div>
+              <span 
+                class="text-xs font-semibold px-2 py-0.5 rounded-full"
+                :class="modalProduct?.is_in_stock ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'"
+                x-text="modalProduct?.is_in_stock ? 'En Stock' : 'Sin Stock'"
+              ></span>
+            </div>
+
+            <!-- VARIANTS SELECTOR (If product is variable) -->
+            <template x-if="modalProduct?.variations && modalProduct.variations.length > 0">
+              <div class="mb-5 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-2">
+                  Seleccionar Variante:
+                </label>
+                <div class="flex flex-col gap-2">
+                  <template x-for="v in modalProduct.variations" :key="v.id">
+                    <label 
+                      class="flex items-center justify-between p-2.5 rounded-lg border text-xs cursor-pointer transition"
+                      :class="modalSelectedVariation?.id === v.id ? 'bg-white border-brand-500 shadow-sm ring-1 ring-brand-500' : 'bg-slate-100/70 border-slate-200 hover:bg-white'"
+                    >
+                      <div class="flex items-center gap-2">
+                        <input 
+                          type="radio" 
+                          name="product_variation" 
+                          :value="v.id" 
+                          :checked="modalSelectedVariation?.id === v.id"
+                          @change="selectVariation(v)"
+                          class="text-brand-600 focus:ring-brand-500"
+                        />
+                        <span class="font-medium text-slate-800" x-text="formatVariantAttributes(v.attributes)"></span>
+                      </div>
+                      <span class="font-mono font-bold text-slate-700" x-text="'ID: ' + v.id"></span>
+                    </label>
+                  </template>
+                </div>
+              </div>
+            </template>
+
+            <!-- Quantity & Add to Cart -->
+            <div class="mb-5 flex items-center gap-3">
+              <div class="flex items-center border border-slate-300 rounded-xl bg-slate-50 overflow-hidden">
+                <button @click="modalQty = Math.max(1, modalQty - 1)" class="px-3 py-2 text-slate-600 hover:bg-slate-200 font-bold">-</button>
+                <input type="number" x-model.number="modalQty" min="1" class="w-12 text-center bg-transparent text-sm font-semibold text-slate-800 focus:outline-none" />
+                <button @click="modalQty = modalQty + 1" class="px-3 py-2 text-slate-600 hover:bg-slate-200 font-bold">+</button>
+              </div>
+
+              <button 
+                @click="addModalProductToCart()" 
+                class="flex-1 py-2.5 px-4 bg-brand-600 hover:bg-brand-700 active:bg-brand-800 text-white font-bold text-sm rounded-xl shadow-md shadow-brand-500/20 transition flex items-center justify-center gap-2"
+              >
+                <span>🛒</span>
+                <span>Agregar a <span x-text="getActiveCartName()"></span></span>
+              </button>
+            </div>
+
+            <!-- Description -->
+            <div class="border-t border-slate-200 pt-4">
+              <h4 class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Descripción y Ficha Técnica</h4>
+              <div class="text-xs text-slate-600 leading-relaxed max-h-48 overflow-y-auto custom-scrollbar prose prose-sm" x-html="modalProduct?.description || '<p>Sin descripción disponible.</p>'"></div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DRAWER: CARTS & BUDGETS -->
+  <div 
+    x-show="cartDrawerOpen" 
+    class="fixed inset-0 z-50 overflow-hidden bg-slate-900/60 backdrop-blur-sm"
+    x-transition.opacity
+  >
+    <div class="absolute inset-y-0 right-0 max-w-full flex pl-0 sm:pl-10 w-full sm:w-auto">
+      <div 
+        @click.away="cartDrawerOpen = false" 
+        class="w-full sm:w-screen sm:max-w-md bg-white shadow-2xl flex flex-col border-l border-slate-200 h-full"
+      >
+        <!-- Drawer Header -->
+        <div class="px-4 py-3.5 sm:p-5 border-b border-slate-200 bg-slate-50 flex items-center justify-between shrink-0">
+          <div class="flex items-center gap-2">
+            <span class="text-xl">📋</span>
+            <div>
+              <h3 class="font-bold text-slate-900 text-sm sm:text-base truncate max-w-[220px] sm:max-w-xs" x-text="currentCart ? currentCart.name : 'Presupuesto'"></h3>
+              <p class="text-[11px] sm:text-xs text-slate-500">Gestión de cotizaciones multi-proveedor</p>
+            </div>
+          </div>
+          <button @click="cartDrawerOpen = false" class="text-slate-400 hover:text-slate-700 text-2xl font-bold p-1 leading-none" aria-label="Cerrar">✕</button>
+        </div>
+
+        <!-- Cart Selector & Controls -->
+        <div class="p-3.5 sm:p-4 bg-slate-100/80 border-b border-slate-200 flex flex-col gap-2 shrink-0">
+          <div class="flex items-center gap-2">
+            <label class="text-xs font-bold text-slate-600 whitespace-nowrap">Carrito:</label>
+            <select 
+              x-model="activeCartId" 
+              @change="loadActiveCart()" 
+              class="flex-1 bg-white border border-slate-300 text-slate-800 text-xs font-medium rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500 truncate"
+            >
+              <template x-for="c in carts" :key="c.id">
+                <option :value="c.id" x-text="c.name + ' (' + c.item_count + ')'"></option>
+              </template>
+            </select>
+          </div>
+
+          <div class="flex items-center justify-between gap-2 pt-1 text-xs">
+            <button 
+              @click="openNewCartModal = true" 
+              class="text-brand-600 hover:text-brand-800 font-bold flex items-center gap-1 py-1"
+            >
+              <span>＋</span> Crear nuevo carrito
+            </button>
+            <button 
+              x-show="carts.length > 1"
+              @click="deleteCurrentCart()" 
+              class="text-rose-600 hover:text-rose-800 font-medium py-1"
+            >
+              Eliminar este carrito
+            </button>
+          </div>
+        </div>
+
+        <!-- Cart Items List -->
+        <div class="flex-1 overflow-y-auto p-3 sm:p-4 custom-scrollbar flex flex-col gap-2.5 overscroll-contain">
+          <template x-if="!currentCart || currentCart.items.length === 0">
+            <div class="text-center py-16 text-slate-400">
+              <div class="text-4xl mb-2">🛒</div>
+              <p class="text-sm font-medium text-slate-600">Este carrito está vacío</p>
+              <p class="text-xs text-slate-400 mt-1">Busca productos y haz clic en "Agregar" para armar tu presupuesto.</p>
+            </div>
+          </template>
+
+          <template x-for="item in currentCart?.items" :key="item.id">
+            <div class="p-2.5 sm:p-3 bg-white rounded-xl border border-slate-200 shadow-xs flex items-center gap-2.5 sm:gap-3">
+              <!-- Item Image -->
+              <div class="w-12 h-12 bg-slate-100 rounded-lg overflow-hidden shrink-0 flex items-center justify-center p-1 border border-slate-200">
+                <img :src="item.image_url" :alt="item.name" class="w-full h-full object-contain mix-blend-multiply" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'24\' height=\'24\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%23ccc\' stroke-width=\'2\'><rect x=\'3\' y=\'3\' width=\'18\' height=\'18\' rx=\'2\'/></svg>'" />
+              </div>
+
+              <!-- Item Info -->
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-1.5 mb-0.5">
+                  <span 
+                    class="text-[9px] font-bold px-1.5 py-0.2 rounded text-white" 
+                    :class="getProviderBadgeClass(item.provider)" 
+                    x-text="item.provider || 'Paternal SRL'"
+                  ></span>
+                  <span class="font-mono text-slate-500 text-[10px]" x-text="item.sku ? 'SKU: ' + item.sku : ''"></span>
+                </div>
+                <h4 class="text-xs font-semibold text-slate-800 truncate" :title="item.name" x-text="item.name"></h4>
+                <span x-show="item.variant_label" class="bg-blue-50 text-blue-700 px-1 rounded text-[10px]" x-text="item.variant_label"></span>
+                <div class="text-xs font-bold text-slate-900 mt-0.5" x-text="formatCurrency(item.price)"></div>
+              </div>
+
+              <!-- Quantity Controls -->
+              <div class="flex items-center border border-slate-200 rounded-lg bg-slate-50 overflow-hidden text-xs shrink-0">
+                <button @click="updateCartItemQty(item, -1)" class="w-7 h-7 flex items-center justify-center text-slate-600 hover:bg-slate-200 font-bold active:bg-slate-300">-</button>
+                <span class="w-7 text-center font-bold text-slate-800 text-xs" x-text="item.quantity"></span>
+                <button @click="updateCartItemQty(item, 1)" class="w-7 h-7 flex items-center justify-center text-slate-600 hover:bg-slate-200 font-bold active:bg-slate-300">+</button>
+              </div>
+
+              <!-- Delete Button -->
+              <button @click="removeCartItem(item.id)" class="text-slate-400 hover:text-rose-600 p-1.5 transition shrink-0" title="Eliminar ítem">
+                ✕
+              </button>
+            </div>
+          </template>
+        </div>
+
+        <!-- Drawer Footer -->
+        <div class="p-4 sm:p-5 border-t border-slate-200 bg-slate-50 flex flex-col gap-2.5 shrink-0 safe-bottom">
+          <!-- Total -->
+          <div class="flex items-baseline justify-between">
+            <span class="text-xs font-bold uppercase tracking-wider text-slate-500">Total Presupuestado</span>
+            <span class="text-xl sm:text-2xl font-black text-slate-900" x-text="formatCurrency(currentCart ? currentCart.total_amount : 0)"></span>
+          </div>
+
+          <!-- Actions -->
+          <div class="flex flex-col gap-2 mt-1">
+            <button 
+              @click="copyBudgetToClipboard()" 
+              :disabled="!currentCart || currentCart.items.length === 0"
+              class="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 disabled:opacity-40 text-white font-bold text-xs sm:text-sm rounded-xl shadow-md shadow-emerald-500/20 transition flex items-center justify-center gap-2"
+            >
+              <span>📋</span>
+              <span>Copiar para WhatsApp / Email</span>
+            </button>
+
+            <div class="grid grid-cols-2 gap-2">
+              <a 
+                :href="'/api/carts/' + activeCartId + '/export'" 
+                :class="(!currentCart || currentCart.items.length === 0) ? 'pointer-events-none opacity-40' : ''"
+                class="py-2 px-3 text-center bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 font-semibold text-xs rounded-xl shadow-sm transition flex items-center justify-center gap-1"
+              >
+                <span>📥</span> Descargar Excel
+              </a>
+              <button 
+                @click="clearCurrentCart()" 
+                :disabled="!currentCart || currentCart.items.length === 0"
+                class="py-2 px-3 bg-white hover:bg-rose-50 border border-slate-300 hover:border-rose-300 text-rose-600 disabled:opacity-40 font-semibold text-xs rounded-xl shadow-sm transition text-center"
+              >
+                Vaciar Carrito
+              </button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: CREAR NUEVO CARRITO -->
+  <div 
+    x-show="openNewCartModal" 
+    class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4"
+    x-transition.opacity
+  >
+    <div @click.away="openNewCartModal = false" class="bg-white rounded-2xl shadow-xl max-w-sm w-full p-5 border border-slate-200">
+      <h3 class="font-bold text-slate-900 text-base mb-1">Nuevo Presupuesto / Carrito</h3>
+      <p class="text-xs text-slate-500 mb-4">Ingresa un nombre para identificar este presupuesto (ej. "Obra Centro", "Cliente Pérez").</p>
+      
+      <input 
+        type="text" 
+        x-model="newCartName" 
+        placeholder="Nombre del presupuesto..."
+        @keyup.enter="createNewCart()"
+        class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 mb-4"
+      />
+
+      <div class="flex justify-end gap-2">
+        <button @click="openNewCartModal = false" class="px-3.5 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg">Cancelar</button>
+        <button @click="createNewCart()" class="px-4 py-2 text-xs font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg shadow-sm">Crear Carrito</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST NOTIFICATION -->
+  <div 
+    x-show="toast.show" 
+    x-transition 
+    class="fixed bottom-5 right-5 z-50 bg-slate-900 text-white text-xs font-semibold px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2 border border-slate-700"
+  >
+    <span x-text="toast.icon || '✓'"></span>
+    <span x-text="toast.message"></span>
+  </div>
+
+  <!-- JAVASCRIPT APPLICATION LOGIC -->
+  <script>
+    function paternalApp() {
+      return {
+        searchQuery: '',
+        selectedProvider: '',
+        selectedCategory: '',
+        products: [],
+        categories: [],
+        providersSummary: [],
+        totalResults: 0,
+        totalCatalogAll: 7486,
+        currentPage: 1,
+        totalPages: 1,
+        limit: 40,
+        loading: false,
+        loadingMore: false,
+        scrolledDown: false,
+
+        // Modales y Drawer
+        modalOpen: false,
+        modalProduct: null,
+        modalActiveImage: '',
+        modalSelectedVariation: null,
+        modalSelectedPrice: null,
+        modalQty: 1,
+
+        cartDrawerOpen: false,
+        openNewCartModal: false,
+        newCartName: '',
+
+        // Carritos
+        carts: [],
+        activeCartId: null,
+        currentCart: null,
+
+        // Autenticación (Better Auth)
+        currentUser: null,
+        authModalOpen: false,
+        authTab: 'login',
+        authError: '',
+        authLoading: false,
+        authForm: { name: '', email: '', password: '' },
+
+        // Toast
+        toast: { show: false, message: '', icon: '✓' },
+
+        showToast(message, icon = '✓') {
+          this.toast = { show: true, message, icon };
+          setTimeout(() => { this.toast.show = false; }, 3000);
+        },
+
+        async init() {
+          await this.checkSession();
+          await this.loadProviders();
+          await this.loadCategories();
+          await this.loadCarts();
+          await this.performSearch(1);
+
+          // Escuchar scroll para el botón flotante "Volver arriba"
+          window.addEventListener('scroll', () => {
+            this.scrolledDown = window.scrollY > 350;
+          }, { passive: true });
+
+          // Configurar IntersectionObserver para Scroll Infinito
+          this.setupInfiniteScroll();
+        },
+
+        setupInfiniteScroll() {
+          // Reintentar si el DOM aún no pintó el sentinel
+          const checkSentinel = () => {
+            const sentinel = document.getElementById('scroll-sentinel');
+            if (!sentinel) {
+              setTimeout(checkSentinel, 100);
+              return;
+            }
+
+            const observer = new IntersectionObserver((entries) => {
+              const entry = entries[0];
+              if (entry.isIntersecting) {
+                if (!this.loading && !this.loadingMore && this.currentPage < this.totalPages) {
+                  this.loadNextPage();
+                }
+              }
+            }, {
+              rootMargin: '400px' // Se activa 400px antes de llegar al pie
+            });
+
+            observer.observe(sentinel);
+          };
+
+          this.$nextTick ? this.$nextTick(checkSentinel) : setTimeout(checkSentinel, 50);
+        },
+
+        async checkSession() {
+          try {
+            const res = await fetch('/api/auth/get-session', { credentials: 'include' });
+            if (res.ok) {
+              const data = await res.json();
+              this.currentUser = data?.user || null;
+            } else {
+              this.currentUser = null;
+            }
+          } catch (e) {
+            this.currentUser = null;
+          }
+        },
+
+        async submitAuth() {
+          this.authLoading = true;
+          this.authError = '';
+          try {
+            const endpoint = this.authTab === 'login' ? '/api/auth/sign-in/email' : '/api/auth/sign-up/email';
+            const payload = this.authTab === 'login'
+              ? { email: this.authForm.email, password: this.authForm.password }
+              : { name: this.authForm.name, email: this.authForm.email, password: this.authForm.password };
+
+            const res = await fetch(endpoint, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify(payload)
+            });
+
+            const data = await res.json();
+            if (!res.ok) {
+              this.authError = data.message || 'Error en autenticación. Verifica tus credenciales.';
+              return;
+            }
+
+            this.currentUser = data.user;
+            this.authModalOpen = false;
+            this.authForm = { name: '', email: '', password: '' };
+            this.showToast(this.authTab === 'login' ? '¡Bienvenido nuevamente!' : '¡Cuenta creada con éxito!', '👋');
+            await this.loadCarts();
+          } catch (e) {
+            this.authError = 'No se pudo conectar con el servidor de autenticación.';
+          } finally {
+            this.authLoading = false;
+          }
+        },
+
+        async logout() {
+          try {
+            await fetch('/api/auth/sign-out', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({})
+            });
+            this.currentUser = null;
+            this.showToast('Sesión cerrada correctamente', '🚪');
+            await this.loadCarts();
+          } catch (e) {
+            console.error('Error cerrando sesión', e);
+          }
+        },
+
+        async loadProviders() {
+          try {
+            const res = await fetch('/api/providers');
+            this.providersSummary = await res.json();
+            this.totalCatalogAll = this.providersSummary.reduce((acc, p) => acc + p.count, 0);
+          } catch (e) {
+            console.error('Error cargando proveedores', e);
+          }
+        },
+
+        getProviderCount(name) {
+          const p = this.providersSummary.find(x => x.provider === name);
+          return p ? p.count.toLocaleString('es-AR') : '0';
+        },
+
+        getProviderBadgeClass(provider, transparent = false) {
+          if (provider === 'Paternal SRL') return transparent ? 'bg-blue-600/90 text-white' : 'bg-blue-600 text-white';
+          if (provider === 'Electro Tucumán') return transparent ? 'bg-amber-600/90 text-white' : 'bg-amber-600 text-white';
+          if (provider === 'Electrocity') return transparent ? 'bg-purple-600/90 text-white' : 'bg-purple-600 text-white';
+          if (provider === 'Jalux') return transparent ? 'bg-red-600/90 text-white' : 'bg-red-600 text-white';
+          if (provider === 'Adma Distribuidora') return transparent ? 'bg-emerald-600/90 text-white' : 'bg-emerald-600 text-white';
+          return transparent ? 'bg-slate-700/90 text-white' : 'bg-slate-700 text-white';
+        },
+
+        async setProvider(name) {
+          this.selectedProvider = name;
+          await this.loadCategories();
+          await this.performSearch(1);
+        },
+
+        async loadCategories() {
+          try {
+            const params = new URLSearchParams();
+            if (this.selectedProvider) params.set('provider', this.selectedProvider);
+            const res = await fetch(`/api/categories?${params}`);
+            this.categories = await res.json();
+          } catch (e) {
+            console.error('Error cargando categorías', e);
+          }
+        },
+
+        async performSearch(page = 1) {
+          this.loading = true;
+          this.currentPage = 1;
+          this.products = [];
+          try {
+            const params = new URLSearchParams({
+              q: this.searchQuery,
+              provider: this.selectedProvider,
+              category: this.selectedCategory,
+              page: 1,
+              limit: this.limit
+            });
+            const res = await fetch(`/api/search?${params}`);
+            const data = await res.json();
+            this.products = data.products;
+            this.totalResults = data.total;
+            this.totalPages = Math.ceil(data.total / this.limit);
+          } catch (e) {
+            console.error('Error en búsqueda', e);
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        async loadNextPage() {
+          if (this.loading || this.loadingMore || this.currentPage >= this.totalPages) return;
+          this.loadingMore = true;
+          const nextPage = this.currentPage + 1;
+          try {
+            const params = new URLSearchParams({
+              q: this.searchQuery,
+              provider: this.selectedProvider,
+              category: this.selectedCategory,
+              page: nextPage,
+              limit: this.limit
+            });
+            const res = await fetch(`/api/search?${params}`);
+            const data = await res.json();
+            this.products = [...this.products, ...data.products];
+            this.currentPage = nextPage;
+            this.totalResults = data.total;
+            this.totalPages = Math.ceil(data.total / this.limit);
+          } catch (e) {
+            console.error('Error cargando más productos', e);
+          } finally {
+            this.loadingMore = false;
+          }
+        },
+
+        formatCurrency(num) {
+          if (!num && num !== 0) return '$ 0';
+          return '$ ' + Number(num).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        },
+
+        // Producto Modal & Variantes
+        openProductModal(p) {
+          this.modalProduct = p;
+          this.modalActiveImage = p.image_url;
+          this.modalQty = 1;
+          if (p.variations && p.variations.length > 0) {
+            this.modalSelectedVariation = p.variations[0];
+            this.modalSelectedPrice = p.price;
+          } else {
+            this.modalSelectedVariation = null;
+            this.modalSelectedPrice = p.price;
+          }
+          this.modalOpen = true;
+        },
+
+        selectVariation(v) {
+          this.modalSelectedVariation = v;
+        },
+
+        formatVariantAttributes(attrs) {
+          if (!attrs || !attrs.length) return 'Variante';
+          return attrs.map(a => `${a.name}: ${a.value}`).join(' | ');
+        },
+
+        async handleQuickAdd(p) {
+          if (p.type === 'variable' && p.variations && p.variations.length > 0) {
+            this.openProductModal(p);
+            return;
+          }
+          await this.addItemToCart({
+            provider: p.provider,
+            product_uid: p.uid,
+            product_id: p.id,
+            variation_id: null,
+            name: p.name,
+            variant_label: '',
+            sku: p.sku,
+            price: p.price,
+            quantity: 1,
+            image_url: p.image_url,
+            permalink: p.permalink
+          });
+        },
+
+        async addModalProductToCart() {
+          const p = this.modalProduct;
+          if (!p) return;
+
+          let varLabel = '';
+          let varId = null;
+          if (this.modalSelectedVariation) {
+            varId = this.modalSelectedVariation.id;
+            varLabel = this.formatVariantAttributes(this.modalSelectedVariation.attributes);
+          }
+
+          await this.addItemToCart({
+            provider: p.provider,
+            product_uid: p.uid,
+            product_id: p.id,
+            variation_id: varId,
+            name: p.name,
+            variant_label: varLabel,
+            sku: p.sku,
+            price: this.modalSelectedPrice || p.price,
+            quantity: this.modalQty || 1,
+            image_url: this.modalActiveImage || p.image_url,
+            permalink: p.permalink
+          });
+
+          this.modalOpen = false;
+        },
+
+        // Carritos
+        async loadCarts() {
+          try {
+            const res = await fetch('/api/carts');
+            this.carts = await res.json();
+            if (this.carts.length > 0) {
+              if (!this.activeCartId || !this.carts.find(c => c.id == this.activeCartId)) {
+                this.activeCartId = this.carts[0].id;
+              }
+              await this.loadActiveCart();
+            }
+          } catch (e) {
+            console.error('Error cargando carritos', e);
+          }
+        },
+
+        async loadActiveCart() {
+          if (!this.activeCartId) return;
+          try {
+            const res = await fetch(`/api/carts/${this.activeCartId}`);
+            this.currentCart = await res.json();
+          } catch (e) {
+            console.error('Error cargando detalle de carrito', e);
+          }
+        },
+
+        getActiveCartName() {
+          const c = this.carts.find(x => x.id == this.activeCartId);
+          return c ? c.name : 'Presupuesto';
+        },
+
+        async createNewCart() {
+          if (!this.newCartName.trim()) return;
+          try {
+            const res = await fetch('/api/carts', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: this.newCartName.trim() })
+            });
+            const newCart = await res.json();
+            this.newCartName = '';
+            this.openNewCartModal = false;
+            await this.loadCarts();
+            this.activeCartId = newCart.id;
+            await this.loadActiveCart();
+            this.showToast(`Carrito "${newCart.name}" creado`);
+          } catch (e) {
+            alert('Error al crear carrito');
+          }
+        },
+
+        async deleteCurrentCart() {
+          if (!confirm(`¿Eliminar el carrito "${this.getActiveCartName()}"?`)) return;
+          try {
+            await fetch(`/api/carts/${this.activeCartId}`, { method: 'DELETE' });
+            await this.loadCarts();
+            this.showToast('Carrito eliminado');
+          } catch (e) {
+            alert('No se pudo eliminar el carrito');
+          }
+        },
+
+        async addItemToCart(itemData) {
+          if (!this.activeCartId) return;
+          try {
+            const res = await fetch(`/api/carts/${this.activeCartId}/items`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(itemData)
+            });
+            this.currentCart = await res.json();
+            await this.loadCarts();
+            this.showToast(`Agregado: ${itemData.name.substring(0, 26)}...`);
+          } catch (e) {
+            console.error('Error al agregar ítem', e);
+          }
+        },
+
+        async updateCartItemQty(item, delta) {
+          await this.addItemToCart({
+            provider: item.provider,
+            product_uid: item.product_uid,
+            product_id: item.product_id,
+            variation_id: item.variation_id,
+            name: item.name,
+            variant_label: item.variant_label,
+            sku: item.sku,
+            price: item.price,
+            quantity: delta,
+            image_url: item.image_url,
+            permalink: item.permalink
+          });
+        },
+
+        async removeCartItem(itemId) {
+          try {
+            await fetch(`/api/carts/items/${itemId}`, { method: 'DELETE' });
+            await this.loadActiveCart();
+            await this.loadCarts();
+          } catch (e) {
+            console.error('Error al eliminar ítem', e);
+          }
+        },
+
+        async clearCurrentCart() {
+          if (!confirm('¿Seguro que deseas vaciar todos los productos de este presupuesto?')) return;
+          try {
+            const res = await fetch(`/api/carts/${this.activeCartId}/clear`, { method: 'POST' });
+            this.currentCart = await res.json();
+            await this.loadCarts();
+            this.showToast('Carrito vaciado');
+          } catch (e) {
+            console.error('Error al vaciar', e);
+          }
+        },
+
+        copyBudgetToClipboard() {
+          if (!this.currentCart || !this.currentCart.items.length) return;
+          
+          const date = new Date().toLocaleDateString('es-AR');
+          let text = `*PRESUPUESTO: ${this.currentCart.name.toUpperCase()}*\n`;
+          text += `Fecha: ${date}\n`;
+          text += `------------------------------------\n`;
+          
+          this.currentCart.items.forEach((item, idx) => {
+            const sub = item.price * item.quantity;
+            const prov = item.provider ? `[${item.provider}] ` : '';
+            text += `${idx + 1}. *${prov}${item.name}*\n`;
+            if (item.variant_label) text += `   Variante: ${item.variant_label}\n`;
+            if (item.sku) text += `   SKU: ${item.sku}\n`;
+            text += `   Cant: ${item.quantity} x ${this.formatCurrency(item.price)} = *${this.formatCurrency(sub)}*\n`;
+            if (item.image_url) text += `   Foto: ${item.image_url}\n`;
+            text += `\n`;
+          });
+
+          text += `------------------------------------\n`;
+          text += `*TOTAL ESTIMADO: ${this.formatCurrency(this.currentCart.total_amount)}*\n`;
+          
+          navigator.clipboard.writeText(text).then(() => {
+            this.showToast('¡Presupuesto copiado al portapapeles!', '📋');
+          }).catch(err => {
+            alert('No se pudo copiar automáticamente.');
+          });
+        }
+      }
+    }
+  </script>
+</body>
+</html>
