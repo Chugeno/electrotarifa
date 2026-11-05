@@ -7,6 +7,8 @@ incrustado en cada página de catálogo (30 páginas de 100 productos c/u).
 """
 
 import sys
+import re
+import html
 import time
 import json
 import argparse
@@ -75,6 +77,71 @@ def extract_products_js(html: str) -> List[Dict[str, Any]]:
             return []
     return []
 
+SKU_PREFIX_BRAND = {
+    "01CAM": "CAMBRE",
+    "01JEL": "JELUZ",
+    "01BAW": "BAW",
+    "01SIC": "SICA",
+    "01BUL": "BULIT",
+    "01JAD": "JADEVER",
+    "01ZOL": "ZOLODA",
+    "01MIL": "MILWAUKEE",
+    "01AEA": "AEA",
+    "01MAC": "MACROLED",
+    "01JAI": "JA",
+    "01X28": "X-28",
+    "01TUB": "ABB",
+    "01GAM": "GABEXEL",
+    "01COM": "COMMAX",
+    "01FRL": "FERROLUX",
+    "01ELI": "ELIBET",
+    "01CON": "CONEXTUBE",
+    "01MLG": "SCHNEIDER",
+    "01FNA": "HELLERMANN",
+    "01TLM": "SCHNEIDER",
+    "01CFV": "EPUYEN",
+    "01SMT": "SAMET",
+    "01INS": "FLUKE",
+    "01HOM": "GENROD",
+    "01GER": "GENROD",
+    "01RIC": "RICHI",
+    "01CHI": "CHINT",
+    "01TRV": "TRV",
+    "01TEA": "TEA",
+    "01ROL": "ROLUX",
+    "01NIA": "NIAN",
+    "01KAL": "KALOP",
+    "01UNV": "UNV",
+    "01TOO": "TOOLMEN",
+    "01GMS": "GAMA SONIC",
+    "01PIR": "PRYSMIAN",
+    "01LMC": "LUMENAC",
+    "01TEK": "TEKOX",
+    "01ABR": "ABROND",
+    "01TCU": "LCT",
+    "01PMA": "GABEXEL",
+    "01DUR": "ENERGIZER",
+    "01TET": "PAMPACO",
+}
+
+LINE_NAMES_AS_BRAND = {"TOKIO", "ROMA", "MILÁN", "MILAN", "KING", "KINETIC", "SAN MIGUEL", "VARIOS", "ELECTROCITY"}
+
+def normalize_electrocity_brand_and_name(sku: str, brand: str, name: str):
+    # Separar palabras pegadas con líneas conocidas (ej. "BlancaTokio" -> "Blanca Tokio")
+    for line in ("Tokio", "Roma", "Milán", "King", "Kinetic"):
+        name = re.sub(rf"([a-záéíóú])({line})\b", r"\1 \2", name)
+    pref = (sku or "")[:5].upper()
+    b_up = (brand or "").strip().upper()
+    if pref == "01MAC" or b_up in LINE_NAMES_AS_BRAND:
+        mapped = SKU_PREFIX_BRAND.get(pref)
+        if mapped:
+            brand = mapped
+    elif not b_up and pref in SKU_PREFIX_BRAND:
+        brand = SKU_PREFIX_BRAND[pref]
+    elif b_up in SKU_PREFIX_BRAND.values():
+        brand = b_up
+    return brand.strip(), name.strip()
+
 def parse_electrocity_product(p: Dict[str, Any]) -> Dict[str, Any]:
     prod_id = p["id"]
     name_obj = p.get("name") or {}
@@ -90,6 +157,7 @@ def parse_electrocity_product(p: Dict[str, Any]) -> Dict[str, Any]:
     first_var = variants[0] if variants else {}
     price = min_p if min_p > 0 else float(first_var.get("price") or 0.0)
     sku = (first_var.get("sku") or "").strip()
+    brand, name = normalize_electrocity_brand_and_name(sku, brand, name)
 
     # Imágenes
     raw_imgs = p.get("images") or []

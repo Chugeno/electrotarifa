@@ -339,12 +339,22 @@
                 :title="p.name"
                 x-text="p.name"
               ></h3>
+
+              <!-- Variants preview pills -->
+              <template x-if="p.variations && p.variations.length > 1">
+                <div class="flex flex-wrap gap-1 mb-1" @click="openProductModal(p)">
+                  <template x-for="v in p.variations.slice(0, 4)" :key="v.id">
+                    <span class="text-[10px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-200/70 px-1.5 py-0.5 rounded cursor-pointer" x-text="formatVariantShort(v)"></span>
+                  </template>
+                  <span x-show="p.variations.length > 4" class="text-[10px] font-semibold text-slate-400 px-1" x-text="'+' + (p.variations.length - 4)"></span>
+                </div>
+              </template>
             </div>
 
             <!-- Price & Actions -->
             <div class="mt-3 pt-3 border-t border-slate-100 flex items-end justify-between gap-2">
               <div>
-                <div class="text-[9px] uppercase font-bold text-slate-400">Precio Final (c/IVA)</div>
+                <div class="text-[9px] uppercase font-bold text-slate-400" x-text="(p.price_range_max && p.price_range_min && p.price_range_max > p.price_range_min) ? 'Desde Final (c/IVA)' : 'Precio Final (c/IVA)'"></div>
                 <div class="text-lg font-black text-slate-900 leading-tight">
                   <span x-text="p.price > 0 ? formatCurrency(p.price) : 'Consultar precio'"></span>
                 </div>
@@ -604,9 +614,9 @@
               <div>
                 <span class="text-xs text-slate-500 font-semibold uppercase tracking-wider block">Precio Final (c/IVA)</span>
                 <span class="text-2xl font-black text-slate-900" x-text="(modalSelectedPrice || modalProduct?.price) > 0 ? formatCurrency(modalSelectedPrice || modalProduct?.price) : 'Consultar precio'"></span>
-                <div x-show="modalProduct?.price_neto" class="text-xs font-medium text-slate-600 mt-1">
-                  <span>Neto sin IVA: </span><span class="font-bold text-slate-800" x-text="formatCurrency(modalProduct?.price_neto)"></span>
-                  <span class="text-[11px] bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded ml-1 font-semibold" x-text="'IVA ' + (modalProduct?.iva_rate || 21) + '%: ' + formatCurrency(modalProduct?.iva_amount)"></span>
+                <div x-show="(modalSelectedPrice || modalProduct?.price) > 0" class="text-xs font-medium text-slate-600 mt-1">
+                  <span>Neto sin IVA: </span><span class="font-bold text-slate-800" x-text="formatCurrency((modalSelectedPrice || modalProduct?.price) / (1 + ((modalProduct?.iva_rate || 21) / 100)))"></span>
+                  <span class="text-[11px] bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded ml-1 font-semibold" x-text="'IVA ' + (modalProduct?.iva_rate || 21) + '%: ' + formatCurrency((modalSelectedPrice || modalProduct?.price) - ((modalSelectedPrice || modalProduct?.price) / (1 + ((modalProduct?.iva_rate || 21) / 100))))"></span>
                 </div>
               </div>
               <span 
@@ -617,29 +627,35 @@
             </div>
 
             <!-- VARIANTS SELECTOR (If product is variable) -->
-            <template x-if="modalProduct?.variations && modalProduct.variations.length > 0">
+            <template x-if="modalProduct?.variations && modalProduct.variations.length > 1">
               <div class="mb-5 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
                 <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-2">
-                  Seleccionar Variante:
+                  Seleccionar Variante (<span x-text="modalProduct.variations.length"></span> opciones):
                 </label>
-                <div class="flex flex-col gap-2">
+                <div class="flex flex-col gap-2 max-h-56 overflow-y-auto custom-scrollbar pr-1">
                   <template x-for="v in modalProduct.variations" :key="v.id">
                     <label 
-                      class="flex items-center justify-between p-2.5 rounded-lg border text-xs cursor-pointer transition"
+                      class="flex items-center justify-between p-2.5 rounded-lg border text-xs cursor-pointer transition gap-2"
                       :class="modalSelectedVariation?.id === v.id ? 'bg-white border-brand-500 shadow-sm ring-1 ring-brand-500' : 'bg-slate-100/70 border-slate-200 hover:bg-white'"
                     >
-                      <div class="flex items-center gap-2">
+                      <div class="flex items-center gap-2 min-w-0">
                         <input 
                           type="radio" 
                           name="product_variation" 
                           :value="v.id" 
                           :checked="modalSelectedVariation?.id === v.id"
                           @change="selectVariation(v)"
-                          class="text-brand-600 focus:ring-brand-500"
+                          class="text-brand-600 focus:ring-brand-500 shrink-0"
                         />
-                        <span class="font-medium text-slate-800" x-text="formatVariantAttributes(v.attributes)"></span>
+                        <div class="min-w-0">
+                          <div class="font-semibold text-slate-800 truncate" x-text="formatVariantAttributes(v)"></div>
+                          <div class="text-[10px] text-slate-500 font-mono flex items-center gap-2">
+                            <span x-text="v.sku ? 'SKU: ' + v.sku : 'ID: ' + v.id"></span>
+                            <span x-show="v.stock !== undefined && v.stock !== null" :class="Number(v.stock) > 0 ? 'text-emerald-600 font-sans font-semibold' : 'text-rose-500 font-sans'" x-text="Number(v.stock) > 0 ? '· Stock: ' + v.stock : '· Sin stock'"></span>
+                          </div>
+                        </div>
                       </div>
-                      <span class="font-mono font-bold text-slate-700" x-text="'ID: ' + v.id"></span>
+                      <span x-show="Number(v.price) > 0" class="font-bold text-slate-900 whitespace-nowrap" x-text="formatCurrency(Number(v.price))"></span>
                     </label>
                   </template>
                 </div>
@@ -1241,8 +1257,7 @@
           this.modalActiveImage = p.image_url;
           this.modalQty = 1;
           if (p.variations && p.variations.length > 0) {
-            this.modalSelectedVariation = p.variations[0];
-            this.modalSelectedPrice = p.price;
+            this.selectVariation(p.variations[0], p.price);
           } else {
             this.modalSelectedVariation = null;
             this.modalSelectedPrice = p.price;
@@ -1250,17 +1265,38 @@
           this.modalOpen = true;
         },
 
-        selectVariation(v) {
+        selectVariation(v, fallbackPrice = 0) {
           this.modalSelectedVariation = v;
+          const vPrice = Number(v?.price || 0);
+          this.modalSelectedPrice = vPrice > 0 ? vPrice : (fallbackPrice || this.modalProduct?.price || 0);
         },
 
-        formatVariantAttributes(attrs) {
-          if (!attrs || !attrs.length) return 'Variante';
-          return attrs.map(a => `${a.name}: ${a.value}`).join(' | ');
+        formatVariantAttributes(v) {
+          if (!v) return 'Variante';
+          const opts = v.options || v.attributes || [];
+          if (Array.isArray(opts) && opts.length > 0) {
+            return opts.map(a => a.name ? `${a.name}: ${a.value}` : a.value).join(' | ');
+          }
+          if (Array.isArray(v.values) && v.values.length > 0) {
+            return v.values.map(x => x.es || Object.values(x)[0]).join(' | ');
+          }
+          return v.sku || 'Variante';
+        },
+
+        formatVariantShort(v) {
+          if (!v) return '';
+          const opts = v.options || v.attributes || [];
+          if (Array.isArray(opts) && opts.length > 0) {
+            return opts.map(a => a.value).join(' / ');
+          }
+          if (Array.isArray(v.values) && v.values.length > 0) {
+            return v.values.map(x => x.es || Object.values(x)[0]).join(' / ');
+          }
+          return v.sku || '';
         },
 
         async handleQuickAdd(p) {
-          if (p.type === 'variable' && p.variations && p.variations.length > 0) {
+          if (p.type === 'variable' && p.variations && p.variations.length > 1) {
             this.openProductModal(p);
             return;
           }
@@ -1285,9 +1321,11 @@
 
           let varLabel = '';
           let varId = null;
-          if (this.modalSelectedVariation) {
+          let varSku = p.sku;
+          if (this.modalSelectedVariation && p.variations && p.variations.length > 1) {
             varId = this.modalSelectedVariation.id;
-            varLabel = this.formatVariantAttributes(this.modalSelectedVariation.attributes);
+            varLabel = this.formatVariantAttributes(this.modalSelectedVariation);
+            if (this.modalSelectedVariation.sku) varSku = this.modalSelectedVariation.sku;
           }
 
           await this.addItemToCart({
@@ -1297,7 +1335,7 @@
             variation_id: varId,
             name: p.name,
             variant_label: varLabel,
-            sku: p.sku,
+            sku: varSku,
             price: this.modalSelectedPrice || p.price,
             quantity: this.modalQty || 1,
             image_url: this.modalActiveImage || p.image_url,

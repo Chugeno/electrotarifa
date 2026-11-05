@@ -9,6 +9,7 @@ Uso:
 """
 
 import sys
+import html
 import argparse
 import time
 import requests
@@ -51,7 +52,7 @@ def process_paternal_item(item: Dict[str, Any]) -> Dict[str, Any]:
     image_url = images[0].get("src", "") if images else ""
     
     categories = item.get("categories") or []
-    cat_names = [c.get("name", "").strip() for c in categories if c.get("name")]
+    cat_names = [html.unescape(c.get("name", "")).strip() for c in categories if c.get("name")]
     categories_text = " | ".join(cat_names)
 
     attributes = item.get("attributes") or []
@@ -63,7 +64,7 @@ def process_paternal_item(item: Dict[str, Any]) -> Dict[str, Any]:
         "provider": "Paternal SRL",
         "id": prod_id,
         "sku": (item.get("sku") or "").strip(),
-        "name": (item.get("name") or "").strip(),
+        "name": html.unescape(item.get("name") or "").strip(),
         "brand": "",
         "slug": item.get("slug") or "",
         "type": item.get("type") or "simple",
