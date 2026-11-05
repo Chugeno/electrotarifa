@@ -104,15 +104,6 @@ app.post("/api/carts", async (c) => {
   return c.json(await db.createCart(name, await currentUserId(c)), 201);
 });
 
-// Export ALL carts of the user (registered before /:id routes)
-app.get("/api/carts/export-all", async (c) => {
-  const userId = await currentUserId(c);
-  const list = await db.listCarts(userId);
-  const carts = (await Promise.all(list.map((x) => db.getCartDetails(x.id)))).filter(Boolean) as any[];
-  const withPrices = c.req.query("prices") !== "0";
-  return csvResponse(c, buildCsv(carts, withPrices), `presupuestos_todos${withPrices ? "" : "_sin_precios"}.csv`);
-});
-
 // Get specific cart details
 app.get("/api/carts/:id", async (c) => {
   const cartId = await ownedCartId(c);

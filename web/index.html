@@ -792,13 +792,33 @@
           <!-- Actions -->
           <div class="flex flex-col gap-2 mt-1">
             <button 
-              @click="copyBudgetToClipboard()" 
+              @click="waPanelOpen = !waPanelOpen" 
               :disabled="!currentCart || currentCart.items.length === 0"
               class="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 disabled:opacity-40 text-white font-bold text-xs sm:text-sm rounded-xl shadow-md shadow-emerald-500/20 transition flex items-center justify-center gap-2"
             >
               <span>📋</span>
               <span>Copiar para WhatsApp / Email</span>
+              <span x-text="waPanelOpen ? '▴' : '▾'"></span>
             </button>
+
+            <!-- Panel: copiar por proveedor -->
+            <div x-show="waPanelOpen" x-cloak class="bg-white border border-emerald-200 rounded-xl p-2 flex flex-col gap-1.5 text-xs">
+              <template x-for="pt in providerTotals()" :key="pt.provider">
+                <div class="flex items-center gap-2">
+                  <span class="flex-1 min-w-0 flex items-center gap-1.5">
+                    <span class="text-[9px] font-bold px-1.5 rounded text-white truncate" :class="getProviderBadgeClass(pt.provider)" x-text="pt.provider"></span>
+                    <span class="text-slate-400 text-[10px]" x-text="pt.count"></span>
+                  </span>
+                  <button @click="copyBudgetToClipboard(pt.provider, true)" class="px-2 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold">💲 Con precio</button>
+                  <button @click="copyBudgetToClipboard(pt.provider, false)" class="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold">📋 Sin precio</button>
+                </div>
+              </template>
+              <div x-show="providerTotals().length > 1" class="flex items-center gap-2 border-t border-slate-100 pt-1.5">
+                <span class="flex-1 font-bold text-slate-700">Todo el carrito</span>
+                <button @click="copyBudgetToClipboard(null, true)" class="px-2 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold">💲 Con precio</button>
+                <button @click="copyBudgetToClipboard(null, false)" class="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold">📋 Sin precio</button>
+              </div>
+            </div>
 
             <div class="grid grid-cols-2 gap-2">
               <div class="relative" x-data="{ open: false }">
@@ -810,16 +830,9 @@
                   <span>📥</span> Exportar Excel ▾
                 </button>
                 <div x-show="open" @click.away="open = false" x-cloak class="absolute bottom-full mb-1.5 left-0 w-60 bg-white rounded-xl shadow-xl border border-slate-200 py-1.5 z-50 text-xs">
-                  <p class="px-3 py-1 text-[10px] font-bold uppercase text-slate-400">Este carrito (agrupado por proveedor)</p>
+                  <p class="px-3 py-1 text-[10px] font-bold uppercase text-slate-400">Agrupado por proveedor</p>
                   <a @click="open = false" :href="'/api/carts/' + activeCartId + '/export'" class="block px-3 py-1.5 hover:bg-slate-100">💲 Con precios y totales</a>
                   <a @click="open = false" :href="'/api/carts/' + activeCartId + '/export?prices=0'" class="block px-3 py-1.5 hover:bg-slate-100">📋 Lista de materiales sin precios</a>
-                  <template x-if="carts.length > 1">
-                    <div class="border-t border-slate-100 mt-1 pt-1">
-                      <p class="px-3 py-1 text-[10px] font-bold uppercase text-slate-400">Todos mis carritos</p>
-                      <a @click="open = false" href="/api/carts/export-all" class="block px-3 py-1.5 hover:bg-slate-100">💲 Con precios y totales</a>
-                      <a @click="open = false" href="/api/carts/export-all?prices=0" class="block px-3 py-1.5 hover:bg-slate-100">📋 Lista de materiales sin precios</a>
-                    </div>
-                  </template>
                 </div>
               </div>
               <button 
@@ -910,6 +923,7 @@
 
         // Autenticación (Better Auth)
         currentUser: null,
+        waPanelOpen: false,
         authModalOpen: false,
         authTab: 'login',
         authError: '',
@@ -1358,39 +1372,61 @@
           }
         },
 
-        copyBudgetToClipboard() {
+        copyBudgetToClipboard(onlyProvider = null, withPrices = true) {
           if (!this.currentCart || !this.currentCart.items.length) return;
-          
+          const items = this.currentCart.items.filter(it => !onlyProvider || (it.provider || 'Paternal SRL') === onlyProvider);
+          if (!items.length) return;
+
           const date = new Date().toLocaleDateString('es-AR');
-          let text = `*PRESUPUESTO: ${this.currentCart.name.toUpperCase()}*\n`;
+          let text = `*${withPrices ? 'PRESUPUESTO' : 'PEDIDO / LISTA DE MATERIALES'}: ${this.currentCart.name.toUpperCase()}*\n`;
+          if (onlyProvider) text += `Proveedor: *${onlyProvider}*\n`;
           text += `Fecha: ${date}\n`;
           text += `------------------------------------\n`;
-          
+
           const groups = {};
-          this.currentCart.items.forEach(it => (groups[it.provider || 'Paternal SRL'] ||= []).push(it));
-          let idx = 0;
-          for (const [prov, items] of Object.entries(groups)) {
-            text += `\n🏬 *${prov.toUpperCase()}*\n`;
+          items.forEach(it => (groups[it.provider || 'Paternal SRL'] ||= []).push(it));
+          let total = 0;
+          for (const [prov, list] of Object.entries(groups)) {
+            if (!onlyProvider) text += `\n🏬 *${prov.toUpperCase()}*\n`;
             let provTotal = 0;
-            items.forEach(item => {
+            list.forEach((item, i) => {
               const sub = item.price * item.quantity;
               provTotal += sub;
-              text += `${++idx}. *${item.name}*\n`;
-              if (item.variant_label) text += `   Variante: ${item.variant_label}\n`;
-              if (item.sku) text += `   SKU: ${item.sku}\n`;
-              text += `   Cant: ${item.quantity} x ${this.formatCurrency(item.price)} = *${this.formatCurrency(sub)}*\n`;
+              const variant = item.variant_label ? ` (${item.variant_label})` : '';
+              const sku = item.sku ? ` [${item.sku}]` : '';
+              text += withPrices
+                ? `${i + 1}. ${item.quantity} x ${item.name}${variant}${sku} — ${this.formatCurrency(item.price)} c/u = *${this.formatCurrency(sub)}*\n`
+                : `${i + 1}. *${item.quantity}* x ${item.name}${variant}${sku}\n`;
             });
-            text += `   ➤ Subtotal ${prov}: *${this.formatCurrency(provTotal)}*\n`;
+            total += provTotal;
+            if (withPrices && !onlyProvider) text += `   ➤ Subtotal ${prov}: *${this.formatCurrency(provTotal)}*\n`;
+          }
+          if (withPrices) {
+            text += `------------------------------------\n`;
+            text += `*TOTAL${onlyProvider ? ' ' + onlyProvider.toUpperCase() : ''}: ${this.formatCurrency(total)}*\n`;
           }
 
-          text += `------------------------------------\n`;
-          text += `*TOTAL ESTIMADO: ${this.formatCurrency(this.currentCart.total_amount)}*\n`;
-          
-          navigator.clipboard.writeText(text).then(() => {
-            this.showToast('¡Presupuesto copiado al portapapeles!', '📋');
-          }).catch(err => {
-            alert('No se pudo copiar automáticamente.');
-          });
+          const label = onlyProvider || 'carrito completo';
+          this.copyText(text)
+            .then(() => this.showToast(`Copiado: ${label} ${withPrices ? 'con' : 'sin'} precios`, '📋'))
+            .catch(() => alert('No se pudo copiar automáticamente.'));
+        },
+
+        // navigator.clipboard solo existe en HTTPS/localhost; por HTTP (Tailscale/LAN) se usa execCommand.
+        async copyText(text) {
+          if (navigator.clipboard && window.isSecureContext) {
+            return navigator.clipboard.writeText(text);
+          }
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.setAttribute('readonly', '');
+          ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;';
+          document.body.appendChild(ta);
+          ta.select();
+          ta.setSelectionRange(0, text.length);
+          const ok = document.execCommand('copy');
+          document.body.removeChild(ta);
+          if (!ok) throw new Error('copy failed');
         }
       }
     }
