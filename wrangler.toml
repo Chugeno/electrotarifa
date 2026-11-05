@@ -15,4 +15,5 @@ run_worker_first = ["/api/*"]
 [vars]
 BETTER_AUTH_URL = "https://electrotarifa.eugenioazurmendi.com.ar"
 DATABASE_URL = "libsql://electrotarifa-eugenioazurmendi.aws-us-east-1.turso.io"
-# Secretos (NO van aquí): npx wrangler secret put DATABASE_AUTH_TOKEN / BETTER_AUTH_SECRET
+BREVO_SENDER_EMAIL = "eugenioazurmendi@gmail.com"
+# Secretos (NO van aquí): npx wrangler secret put DATABASE_AUTH_TOKEN / BETTER_AUTH_SECRET / BREVO_API_KEY
