@@ -22,6 +22,7 @@ from scraper_tucuman import run_scraper_tucuman
 from scraper_electrocity import run_scraper_electrocity
 from scraper_jalux import scrape_jalux
 from scraper_adma import run_scraper_adma
+from scraper_gallardo import run_scraper_gallardo
 
 PATERNAL_API_URL = "https://paternalsrl.com.ar/wp-json/wc/store/v1/products"
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
@@ -149,7 +150,7 @@ def run_scraper_paternal(workers: int = 6, max_pages: Optional[int] = None) -> i
 
 def main():
     parser = argparse.ArgumentParser(description="Actualizador Multi-Proveedor")
-    parser.add_argument("--provider", type=str, default="all", choices=["all", "paternal", "tucuman", "electrocity", "jalux", "adma"], help="Proveedor a actualizar (default: all)")
+    parser.add_argument("--provider", type=str, default="all", choices=["all", "paternal", "tucuman", "electrocity", "jalux", "adma", "gallardo"], help="Proveedor a actualizar (default: all)")
     parser.add_argument("--workers", type=int, default=6, help="Hilos concurrentes (default: 6)")
     parser.add_argument("--pages", type=int, default=None, help="Límite de páginas para pruebas")
     args = parser.parse_args()
@@ -165,6 +166,8 @@ def main():
         scrape_jalux()
     if args.provider in ("all", "adma"):
         run_scraper_adma(workers=min(args.workers, 4), max_pages=args.pages)
+    if args.provider in ("all", "gallardo"):
+        run_scraper_gallardo(workers=args.workers, max_pages=args.pages)
 
     print(f"\n[✓] Sincronización finalizada en {time.time() - start_all:.2f}s.")
     print("Estado actual de la base de datos:")

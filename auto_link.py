@@ -68,7 +68,7 @@ def run_auto_link(db_path: str = "paternal.db") -> int:
     for uid, prov, sku, brand, name, price, sdesc, desc in rows:
         if brand in GENERIC_BRANDS:
             continue
-        if prov in ("Jalux", "Adma Distribuidora", "Electro Tucumán") and sku:
+        if prov in ("Jalux", "Adma Distribuidora", "Electro Tucumán", "Elec. Gallardo") and sku:
             s = sku.strip().upper()
             if is_valid_mfg_code(s, brand):
                 valid_codes_by_brand[brand].add(s)
@@ -87,7 +87,7 @@ def run_auto_link(db_path: str = "paternal.db") -> int:
         codes = valid_codes_by_brand[brand]
         sku_up = (sku or "").strip().upper()
         found_code = None
-        if prov in ("Jalux", "Adma Distribuidora", "Electro Tucumán") and sku_up in codes:
+        if prov in ("Jalux", "Adma Distribuidora", "Electro Tucumán", "Elec. Gallardo") and sku_up in codes:
             found_code = sku_up
         if not found_code:
             clean_desc = re.sub(r"<[^>]+>", " ", html.unescape((sdesc or "") + " " + (desc or "")))

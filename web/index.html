@@ -52,7 +52,7 @@
             <h1 class="font-bold text-base sm:text-lg text-slate-900 leading-tight">Tarifas Proveedores</h1>
             <span class="text-[10px] sm:text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200" x-text="totalCatalogAll ? totalCatalogAll.toLocaleString('es-AR') + ' productos' : 'Catálogo Local'"></span>
           </div>
-          <p class="text-[10px] sm:text-xs text-slate-500 truncate max-w-[200px] sm:max-w-none">5 Proveedores Conectados</p>
+          <p class="text-[10px] sm:text-xs text-slate-500 truncate max-w-[200px] sm:max-w-none">6 Proveedores Conectados</p>
         </div>
       </div>
 
@@ -206,12 +206,22 @@
 
         <button 
           @click="setProvider('Adma Distribuidora')" 
-          class="px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-bold transition flex items-center gap-1.5 border shadow-xs"
+          class="px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-bold transition flex items-center gap-1.5 border shadow-xs shrink-0"
           :class="selectedProvider === 'Adma Distribuidora' ? 'bg-emerald-600 text-white border-emerald-600 shadow-emerald-500/20' : 'bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50/50'"
         >
           <span class="w-2 h-2 rounded-full" :class="selectedProvider === 'Adma Distribuidora' ? 'bg-white' : 'bg-emerald-500'"></span>
           <span>Adma</span>
           <span class="text-[10px] px-1.5 py-0.2 rounded-md font-semibold" :class="selectedProvider === 'Adma Distribuidora' ? 'bg-emerald-700 text-white' : 'bg-emerald-100 text-emerald-900'" x-text="getProviderCount('Adma Distribuidora')"></span>
+        </button>
+
+        <button 
+          @click="setProvider('Elec. Gallardo')" 
+          class="px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-bold transition flex items-center gap-1.5 border shadow-xs shrink-0"
+          :class="selectedProvider === 'Elec. Gallardo' ? 'bg-cyan-600 text-white border-cyan-600 shadow-cyan-500/20' : 'bg-white text-cyan-700 border-cyan-200 hover:bg-cyan-50/50'"
+        >
+          <span class="w-2 h-2 rounded-full" :class="selectedProvider === 'Elec. Gallardo' ? 'bg-white' : 'bg-cyan-500'"></span>
+          <span>Elec. Gallardo</span>
+          <span class="text-[10px] px-1.5 py-0.2 rounded-md font-semibold" :class="selectedProvider === 'Elec. Gallardo' ? 'bg-cyan-700 text-white' : 'bg-cyan-100 text-cyan-900'" x-text="getProviderCount('Elec. Gallardo')"></span>
         </button>
       </div>
 
@@ -1438,6 +1448,7 @@
           if (provider === 'Electrocity') return transparent ? 'bg-purple-600/90 text-white' : 'bg-purple-600 text-white';
           if (provider === 'Jalux') return transparent ? 'bg-red-600/90 text-white' : 'bg-red-600 text-white';
           if (provider === 'Adma Distribuidora') return transparent ? 'bg-emerald-600/90 text-white' : 'bg-emerald-600 text-white';
+          if (provider === 'Elec. Gallardo') return transparent ? 'bg-cyan-600/90 text-white' : 'bg-cyan-600 text-white';
           return transparent ? 'bg-slate-700/90 text-white' : 'bg-slate-700 text-white';
         },
 
@@ -1447,6 +1458,7 @@
           if (provider === 'Electrocity') return 'bg-purple-600';
           if (provider === 'Jalux') return 'bg-red-600';
           if (provider === 'Adma Distribuidora') return 'bg-emerald-600';
+          if (provider === 'Elec. Gallardo') return 'bg-cyan-600';
           return 'bg-slate-600';
         },
 
@@ -1454,6 +1466,7 @@
           if (provider === 'Paternal SRL') return 'Paternal';
           if (provider === 'Electro Tucumán') return 'E. Tucumán';
           if (provider === 'Adma Distribuidora') return 'Adma';
+          if (provider === 'Elec. Gallardo') return 'Gallardo';
           return provider || '';
         },
 

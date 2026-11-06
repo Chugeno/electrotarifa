@@ -8,6 +8,8 @@ import "dotenv/config";
 import { createClient, type InStatement } from "@libsql/client";
 
 const FULL = process.argv.includes("--full");
+const provIdx = process.argv.indexOf("--provider");
+const ONLY_PROVIDER = provIdx >= 0 ? process.argv[provIdx + 1] : null;
 const BATCH = 100;
 
 const url = process.env.DATABASE_URL;
@@ -38,12 +40,19 @@ async function copySchema() {
   }
 }
 
-async function copyTable(table: string, mode: "upsert" | "insert-ignore") {
-  const total = Number((await local.execute(`SELECT COUNT(*) AS n FROM "${table}"`)).rows[0].n);
+async function copyTable(table: string, mode: "upsert" | "insert-ignore", whereProvider: string | null = null) {
+  const whereClause = whereProvider ? " WHERE provider = ?" : "";
+  const whereArgs = whereProvider ? [whereProvider] : [];
+  const total = Number(
+    (await local.execute({ sql: `SELECT COUNT(*) AS n FROM "${table}"${whereClause}`, args: whereArgs })).rows[0].n
+  );
   const verb = mode === "upsert" ? "INSERT OR REPLACE" : "INSERT OR IGNORE";
   let done = 0;
   for (let off = 0; off < total; off += BATCH) {
-    const res = await local.execute({ sql: `SELECT * FROM "${table}" LIMIT ? OFFSET ?`, args: [BATCH, off] });
+    const res = await local.execute({
+      sql: `SELECT * FROM "${table}"${whereClause} LIMIT ? OFFSET ?`,
+      args: [...whereArgs, BATCH, off],
+    });
     const cols = res.columns;
     const stmts: InStatement[] = res.rows.map((row) => ({
       sql: `${verb} INTO "${table}" (${cols.map((c) => `"${c}"`).join(",")}) VALUES (${cols.map(() => "?").join(",")})`,
@@ -65,8 +74,8 @@ async function main() {
       await copyTable(t, "insert-ignore");
     }
   }
-  console.log("📦 Sincronizando productos…");
-  await copyTable("products", "upsert");
+  console.log(`📦 Sincronizando productos${ONLY_PROVIDER ? ` (${ONLY_PROVIDER})` : ""}…`);
+  await copyTable("products", "upsert", ONLY_PROVIDER);
 
   console.log("🔍 Reconstruyendo índice FTS5 en Turso…");
   await remote.execute("INSERT INTO products_fts(products_fts) VALUES('rebuild')");
