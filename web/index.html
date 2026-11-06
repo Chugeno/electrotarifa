@@ -598,21 +598,20 @@
       class="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col overflow-hidden border border-slate-200"
     >
       <!-- Modal Header -->
-      <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
-        <div class="flex items-center gap-2">
+      <div class="px-4 sm:px-6 py-3 sm:py-4 border-b border-slate-200 flex items-center justify-between gap-2 bg-slate-50 shrink-0">
+        <div class="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
           <span 
-            class="text-xs font-bold px-2 py-0.5 rounded text-white" 
+            class="text-xs font-bold px-2 py-0.5 rounded text-white shrink-0" 
             :class="getProviderBadgeClass(modalProduct?.provider)"
             x-text="modalProduct?.provider"
           ></span>
-          <span class="text-xs font-mono bg-slate-200 text-slate-700 px-2 py-0.5 rounded font-semibold" x-text="modalProduct ? (modalProduct.sku ? 'SKU: ' + modalProduct.sku : 'ID: ' + modalProduct.id) : ''"></span>
-          <span class="text-xs text-slate-500 truncate max-w-xs" x-text="modalProduct ? modalProduct.categories_text : ''"></span>
+          <span class="text-xs font-mono bg-slate-200 text-slate-700 px-2 py-0.5 rounded font-semibold truncate" x-text="modalProduct ? (modalProduct.sku ? 'SKU: ' + modalProduct.sku : 'ID: ' + modalProduct.id) : ''"></span>
         </div>
-        <button @click="modalOpen = false" class="text-slate-400 hover:text-slate-700 text-xl font-bold p-1">✕</button>
+        <button @click="modalOpen = false" class="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-200/70 text-xl font-bold leading-none transition" aria-label="Cerrar">✕</button>
       </div>
 
       <!-- Modal Body -->
-      <div class="p-6 overflow-y-auto custom-scrollbar flex-1 flex flex-col md:flex-row gap-6" x-show="modalProduct">
+      <div class="p-4 sm:p-6 overflow-y-auto custom-scrollbar flex-1 flex flex-col md:flex-row gap-5 sm:gap-6" x-show="modalProduct">
         <!-- Image & Gallery -->
         <div class="md:w-1/2 flex flex-col items-center">
           <div class="w-full aspect-square bg-slate-100 rounded-xl overflow-hidden p-4 flex items-center justify-center border border-slate-200">
@@ -648,7 +647,10 @@
         <!-- Info & Actions -->
         <div class="md:w-1/2 flex flex-col justify-between">
           <div>
-            <div x-show="modalProduct?.brand" class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1" x-text="'Marca: ' + modalProduct?.brand"></div>
+            <div class="flex flex-wrap items-center gap-1.5 mb-1.5">
+              <span x-show="modalProduct?.brand" class="text-[11px] font-bold uppercase tracking-wider bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200" x-text="'Marca: ' + modalProduct?.brand"></span>
+              <span x-show="modalProduct?.categories_text" class="text-[11px] text-slate-500 bg-slate-50 px-2 py-0.5 rounded border border-slate-200/70 break-words" x-text="modalProduct?.categories_text"></span>
+            </div>
             <h2 class="text-lg font-bold text-slate-900 leading-snug mb-3" x-text="modalProduct?.name"></h2>
 
             <!-- Price -->
