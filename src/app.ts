@@ -46,16 +46,46 @@ app.get("/api/search", async (c) => {
   const query = c.req.query("q") || "";
   const provider = c.req.query("provider") || "";
   const category = c.req.query("category") || "";
+  const raw = c.req.query("raw") === "1";
   const limit = Math.min(Number(c.req.query("limit") || 40), 100);
   const page = Math.max(Number(c.req.query("page") || 1), 1);
   const offset = (page - 1) * limit;
 
-  const res = await db.searchProducts(query, provider, category, limit, offset);
+  const res = await db.searchProducts(query, provider, category, limit, offset, !provider && !raw);
   return c.json({
     ...res,
     page,
     limit,
   });
+});
+
+// ----------------- Admin Product Linking API (Global, restricted to admin) -----------------
+const ADMIN_EMAIL = "eugenioazurmendi@gmail.com";
+
+async function isAdmin(c: any): Promise<boolean> {
+  const session = await getUserSession(c);
+  const email = String(session?.user?.email || "").trim().toLowerCase();
+  return email === ADMIN_EMAIL;
+}
+
+app.post("/api/admin/link", async (c) => {
+  if (!(await isAdmin(c))) {
+    return c.json({ error: "Solo el administrador puede vincular productos" }, 403);
+  }
+  const body = await c.req.json().catch(() => ({}));
+  const res = await db.linkProducts(String(body.uidA || ""), String(body.uidB || ""));
+  if ((res as any).error) return c.json(res, 400);
+  return c.json(res);
+});
+
+app.post("/api/admin/unlink", async (c) => {
+  if (!(await isAdmin(c))) {
+    return c.json({ error: "Solo el administrador puede desvincular productos" }, 403);
+  }
+  const body = await c.req.json().catch(() => ({}));
+  const res = await db.unlinkProduct(String(body.uid || ""));
+  if ((res as any).error) return c.json(res, 400);
+  return c.json(res);
 });
 
 // API: Providers summary
@@ -163,6 +193,22 @@ app.post("/api/carts/:id/clear", async (c) => {
   const cartId = await ownedCartId(c);
   if (!cartId) return notFound(c);
   return c.json(await db.clearCart(cartId));
+});
+
+// Analyze cart optimization (stock alerts, savings by provider, consolidation)
+app.get("/api/carts/:id/optimize", async (c) => {
+  const cartId = await ownedCartId(c);
+  if (!cartId) return notFound(c);
+  return c.json(await db.analyzeCartOptimization(cartId));
+});
+
+// Replace cart items batch (apply optimization swap or undo)
+app.put("/api/carts/:id/items-batch", async (c) => {
+  const cartId = await ownedCartId(c);
+  if (!cartId) return notFound(c);
+  const body = await c.req.json().catch(() => ({}));
+  if (!Array.isArray(body.items)) return c.json({ error: "Items requeridos" }, 400);
+  return c.json(await db.replaceCartItemsBatch(cartId, body.items));
 });
 
 // Export cart CSV  (?prices=0 → lista de materiales sin precios)

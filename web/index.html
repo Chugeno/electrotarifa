@@ -307,19 +307,33 @@
               📦
             </div>
             
-            <!-- Provider Badge -->
+            <!-- Provider Badge (Mejor precio / seleccionado) -->
             <span 
               class="absolute top-2.5 left-2.5 text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm backdrop-blur-sm"
               :class="getProviderBadgeClass(p.provider, true)"
               x-text="p.provider"
             ></span>
 
-            <!-- Stock Badge -->
-            <span 
-              class="absolute top-2.5 right-2.5 text-[10px] font-semibold px-2 py-0.5 rounded-full backdrop-blur-sm shadow-sm"
-              :class="p.is_in_stock ? 'bg-emerald-500/90 text-white' : 'bg-rose-500/90 text-white'"
-              x-text="p.is_in_stock ? 'En Stock' : 'Sin Stock'"
-            ></span>
+            <!-- Top-right: Multiple Providers Badges (if unified) or Stock Badge -->
+            <div class="absolute top-2.5 right-2.5 flex flex-col items-end gap-1 max-w-[65%]">
+              <template x-if="p.offers && p.offers.length > 1">
+                <div class="flex flex-wrap justify-end gap-1">
+                  <template x-for="of in p.offers" :key="of.uid">
+                    <span 
+                      class="text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-sm backdrop-blur-sm border border-white/30"
+                      :class="[getProviderBadgeClass(of.provider, true), of.is_in_stock ? '' : 'opacity-60 line-through']"
+                      :title="of.provider + ': ' + (of.price > 0 ? formatCurrency(of.price) : 'Consultar') + (of.is_in_stock ? ' (En stock)' : ' (Sin stock)')"
+                      x-text="shortProviderName(of.provider)"
+                    ></span>
+                  </template>
+                </div>
+              </template>
+              <span 
+                class="text-[10px] font-semibold px-2 py-0.5 rounded-full backdrop-blur-sm shadow-sm"
+                :class="p.is_in_stock ? 'bg-emerald-500/90 text-white' : 'bg-rose-500/90 text-white'"
+                x-text="p.is_in_stock ? 'En Stock' : 'Sin Stock'"
+              ></span>
+            </div>
           </div>
 
           <!-- Card Body -->
@@ -352,39 +366,67 @@
             </div>
 
             <!-- Price & Actions -->
-            <div class="mt-3 pt-3 border-t border-slate-100 flex items-end justify-between gap-2">
-              <div>
-                <div class="text-[9px] uppercase font-bold text-slate-400" x-text="(p.price_range_max && p.price_range_min && p.price_range_max > p.price_range_min) ? 'Desde Final (c/IVA)' : 'Precio Final (c/IVA)'"></div>
-                <div class="text-lg font-black text-slate-900 leading-tight">
-                  <span x-text="p.price > 0 ? formatCurrency(p.price) : 'Consultar precio'"></span>
+            <div class="mt-3 pt-3 border-t border-slate-100 flex flex-col gap-2">
+              <div class="flex items-end justify-between gap-2">
+                <div>
+                  <div class="text-[9px] uppercase font-bold text-slate-400 flex items-center gap-1">
+                    <span x-text="(p.offers && p.offers.length > 1) ? 'Mejor Precio (c/IVA)' : ((p.price_range_max && p.price_range_min && p.price_range_max > p.price_range_min) ? 'Desde Final (c/IVA)' : 'Precio Final (c/IVA)')"></span>
+                  </div>
+                  <div class="text-lg font-black text-slate-900 leading-tight">
+                    <span x-text="p.price > 0 ? formatCurrency(p.price) : 'Consultar precio'"></span>
+                  </div>
+                  <div x-show="p.price_neto" class="text-[11px] font-medium text-slate-500 mt-0.5">
+                    <span>Neto: </span><span class="font-semibold text-slate-700" x-text="formatCurrency(p.price_neto)"></span>
+                    <span class="text-[9px] text-slate-400 font-semibold" x-text="'+ IVA ' + (p.iva_rate || 21) + '%'"></span>
+                  </div>
                 </div>
-                <div x-show="p.price_neto" class="text-[11px] font-medium text-slate-500 mt-0.5">
-                  <span>Neto: </span><span class="font-semibold text-slate-700" x-text="formatCurrency(p.price_neto)"></span>
-                  <span class="text-[9px] text-slate-400 font-semibold" x-text="'+ IVA ' + (p.iva_rate || 21) + '%'"></span>
+
+                <div class="flex items-center gap-1.5">
+                  <!-- Info Button -->
+                  <button 
+                    @click="openProductModal(p)" 
+                    class="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition"
+                    title="Ver ficha técnica y comparativa"
+                  >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                  </button>
+
+                  <!-- Add Button -->
+                  <button 
+                    @click="handleQuickAdd(p)" 
+                    class="px-2.5 py-1.5 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 active:bg-brand-800 rounded-lg shadow-sm transition flex items-center gap-1"
+                  >
+                    <span>＋</span>
+                    <span class="hidden sm:inline">Agregar</span>
+                  </button>
                 </div>
               </div>
 
-              <div class="flex items-center gap-1.5">
-                <!-- Info Button -->
-                <button 
+              <!-- Secondary provider prices when product is in >1 provider -->
+              <template x-if="p.offers && p.offers.length > 1">
+                <div 
                   @click="openProductModal(p)" 
-                  class="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition"
-                  title="Ver ficha técnica"
+                  class="pt-2 border-t border-dashed border-slate-200 flex flex-col gap-1 cursor-pointer hover:bg-slate-50/80 -mx-1 px-1 rounded transition"
+                  title="Clic para comparar todos los proveedores"
                 >
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                  </svg>
-                </button>
-
-                <!-- Add Button -->
-                <button 
-                  @click="handleQuickAdd(p)" 
-                  class="px-2.5 py-1.5 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 active:bg-brand-800 rounded-lg shadow-sm transition flex items-center gap-1"
-                >
-                  <span>＋</span>
-                  <span class="hidden sm:inline">Agregar</span>
-                </button>
-              </div>
+                  <div class="text-[10px] font-bold text-slate-500 flex items-center justify-between">
+                    <span x-text="'Disponible en ' + p.offers.length + ' proveedores:'"></span>
+                    <span class="text-brand-600 hover:underline">Comparar ▸</span>
+                  </div>
+                  <template x-for="of in p.offers.slice(1)" :key="of.uid">
+                    <div class="flex items-center justify-between text-[11px]">
+                      <span class="flex items-center gap-1.5 min-w-0">
+                        <span class="w-2 h-2 rounded-full shrink-0" :class="getProviderDotClass(of.provider)"></span>
+                        <span class="font-medium text-slate-600 truncate" x-text="of.provider"></span>
+                        <span x-show="!of.is_in_stock" class="text-[9px] text-rose-500 font-semibold">(Sin stock)</span>
+                      </span>
+                      <span class="font-bold text-slate-700 whitespace-nowrap" :class="!of.is_in_stock ? 'line-through text-slate-400' : ''" x-text="of.price > 0 ? formatCurrency(of.price) : 'Consultar'"></span>
+                    </div>
+                  </template>
+                </div>
+              </template>
             </div>
 
           </div>
@@ -679,6 +721,112 @@
               </button>
             </div>
 
+            <!-- MULTI-PROVIDER COMPARISON TABLE (Etapa 3) -->
+            <template x-if="modalProduct?.offers && modalProduct.offers.length > 1">
+              <div class="mb-5 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+                <div class="flex items-center justify-between mb-2">
+                  <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                    <span>⚖️ Comparativa en <span x-text="modalProduct.offers.length"></span> Proveedores</span>
+                  </h4>
+                  <span class="text-[10px] text-slate-400">Clic para cambiar o sumar</span>
+                </div>
+                <div class="flex flex-col gap-2">
+                  <template x-for="(of, idx) in modalProduct.offers" :key="of.uid">
+                    <div 
+                      class="p-2.5 rounded-lg border text-xs flex items-center justify-between gap-2 transition"
+                      :class="of.uid === modalProduct.uid ? 'bg-white border-brand-500 ring-1 ring-brand-500 shadow-xs' : 'bg-white/70 border-slate-200 hover:bg-white'"
+                    >
+                      <div class="min-w-0 flex-1 cursor-pointer" @click="switchModalToOffer(of.uid)">
+                        <div class="flex items-center gap-1.5 flex-wrap">
+                          <span class="text-[10px] font-bold px-1.5 py-0.5 rounded text-white" :class="getProviderBadgeClass(of.provider)" x-text="of.provider"></span>
+                          <span x-show="idx === 0 && of.is_in_stock && of.price > 0" class="text-[9px] font-bold bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded">🏆 Más económico</span>
+                          <span class="font-mono text-[10px] text-slate-500" x-text="of.sku ? 'SKU: ' + of.sku : ''"></span>
+                          <span class="text-[10px] font-semibold" :class="of.is_in_stock ? 'text-emerald-600' : 'text-rose-500'" x-text="of.is_in_stock ? '· En Stock' : '· Sin Stock'"></span>
+                        </div>
+                        <div class="text-[11px] text-slate-600 truncate mt-0.5" :title="of.name" x-text="of.name"></div>
+                      </div>
+                      <div class="flex items-center gap-1.5 shrink-0">
+                        <div class="text-right mr-1">
+                          <div class="font-black text-slate-900 text-xs sm:text-sm" x-text="of.price > 0 ? formatCurrency(of.price) : 'Consultar'"></div>
+                          <div x-show="of.price_neto > 0" class="text-[10px] text-slate-400" x-text="'Neto: ' + formatCurrency(of.price_neto)"></div>
+                        </div>
+                        <button 
+                          @click="addOfferDirectlyToCart(of)"
+                          class="px-2 py-1.5 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-lg text-[11px] shadow-xs transition"
+                          title="Agregar al carrito con este proveedor"
+                        >
+                          ＋
+                        </button>
+                        <template x-if="isAdminUser()">
+                          <button 
+                            @click="adminUnlinkOffer(of.uid)"
+                            class="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition text-xs"
+                            title="Desvincular este producto del grupo (Global para toda la app)"
+                          >
+                            ✂️
+                          </button>
+                        </template>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </template>
+
+            <!-- ADMIN MANUAL LINKING CONTROLS (Restricted to eugenioazurmendi@gmail.com, Global Effect) -->
+            <template x-if="isAdminUser()">
+              <div class="mb-5 bg-amber-50/70 p-3 rounded-xl border border-amber-200/90">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-1.5 text-xs font-bold text-amber-900">
+                    <span>🔗</span>
+                    <span>Vincular con otro proveedor (Admin Global)</span>
+                  </div>
+                  <button 
+                    type="button"
+                    @click="adminLinkOpen = !adminLinkOpen; if (adminLinkOpen && !adminLinkQuery) { adminLinkQuery = modalProduct?.sku || modalProduct?.brand || ''; searchAdminLinkCandidates(); }"
+                    class="text-[11px] font-bold text-amber-800 hover:text-amber-950 underline"
+                    x-text="adminLinkOpen ? 'Cerrar' : 'Buscar equivalente'"
+                  ></button>
+                </div>
+                <div x-show="adminLinkOpen" class="mt-2.5 flex flex-col gap-2">
+                  <div class="flex gap-1.5">
+                    <input 
+                      type="text" 
+                      x-model="adminLinkQuery"
+                      @input.debounce.300ms="searchAdminLinkCandidates()"
+                      placeholder="Buscar por nombre, código o SKU en otros proveedores..."
+                      class="flex-1 px-2.5 py-1.5 text-xs bg-white border border-amber-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    />
+                  </div>
+                  <div x-show="adminLinkLoading" class="text-[11px] text-amber-700 py-1">Buscando productos...</div>
+                  <div class="flex flex-col gap-1.5 max-h-48 overflow-y-auto custom-scrollbar">
+                    <template x-for="cand in adminLinkResults" :key="cand.uid">
+                      <div class="p-2 bg-white rounded-lg border border-amber-200 flex items-center justify-between gap-2 text-xs">
+                        <div class="min-w-0 flex-1">
+                          <div class="flex items-center gap-1.5">
+                            <span class="text-[9px] font-bold px-1.5 py-0.2 rounded text-white" :class="getProviderBadgeClass(cand.provider)" x-text="cand.provider"></span>
+                            <span class="font-mono text-[10px] text-slate-500" x-text="cand.sku ? 'SKU: ' + cand.sku : ''"></span>
+                            <span class="font-bold text-slate-800 text-[11px]" x-text="cand.price > 0 ? formatCurrency(cand.price) : 'Consultar'"></span>
+                          </div>
+                          <div class="text-[11px] text-slate-700 truncate mt-0.5" :title="cand.name" x-text="cand.name"></div>
+                        </div>
+                        <button 
+                          type="button"
+                          @click="adminLinkWith(cand.uid)"
+                          class="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg text-[11px] shrink-0 transition"
+                        >
+                          🔗 Vincular
+                        </button>
+                      </div>
+                    </template>
+                    <div x-show="!adminLinkLoading && adminLinkQuery && adminLinkResults.length === 0" class="text-[11px] text-slate-500 py-1 text-center">
+                      Sin resultados para vincular.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </template>
+
             <!-- Description -->
             <div class="border-t border-slate-200 pt-4">
               <h4 class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Descripción y Ficha Técnica</h4>
@@ -755,6 +903,108 @@
 
         <!-- Cart Items List -->
         <div class="flex-1 overflow-y-auto p-3 sm:p-4 custom-scrollbar flex flex-col gap-2.5 overscroll-contain">
+
+          <!-- UNDO BAR (Etapa 4) -->
+          <template x-if="lastCartSnapshot">
+            <div class="p-2.5 bg-slate-800 text-white rounded-xl flex items-center justify-between gap-2 text-xs shadow-md">
+              <span class="truncate">✓ Cambio de optimización aplicado</span>
+              <button 
+                @click="undoCartOptimization()" 
+                class="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg shrink-0 transition flex items-center gap-1"
+              >
+                <span>↩️</span>
+                <span>Deshacer</span>
+              </button>
+            </div>
+          </template>
+
+          <!-- CART OPTIMIZER PANEL (Etapa 4: Stock Alerts, Savings by Provider, Logistic Consolidation) -->
+          <template x-if="hasOptimizationSuggestions()">
+            <div class="bg-gradient-to-br from-indigo-50/90 via-white to-emerald-50/70 border border-indigo-200/90 rounded-xl p-3 flex flex-col gap-2.5 shadow-xs">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-1.5 text-xs font-extrabold text-indigo-950">
+                  <span>💡</span>
+                  <span>Optimizador Inteligente de Compra</span>
+                </div>
+                <button 
+                  @click="optimizerExpanded = !optimizerExpanded" 
+                  class="text-[11px] font-bold text-indigo-700 hover:underline"
+                  x-text="optimizerExpanded ? 'Ocultar ▴' : 'Ver sugerencias ▾'"
+                ></button>
+              </div>
+
+              <div x-show="optimizerExpanded" class="flex flex-col gap-2 text-xs">
+                <!-- 1. Stock Alerts -->
+                <template x-for="al in (cartOptimization?.stockAlerts || [])" :key="'st_' + al.itemId">
+                  <div class="p-2 bg-rose-50 border border-rose-200 rounded-lg flex items-center justify-between gap-2">
+                    <div class="min-w-0 flex-1">
+                      <div class="font-bold text-rose-800 text-[11px]">⚠️ Sin stock en <span x-text="al.fromProvider"></span></div>
+                      <div class="text-[11px] text-slate-700 truncate" x-text="al.name"></div>
+                      <div class="text-[10px] text-emerald-700 font-semibold mt-0.5">
+                        En stock en <strong x-text="al.toProvider"></strong> a <strong x-text="formatCurrency(al.toPrice)"></strong>
+                      </div>
+                    </div>
+                    <button 
+                      @click="applySingleSwap(al)" 
+                      class="px-2.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg text-[11px] shrink-0 transition"
+                    >
+                      Cambiar
+                    </button>
+                  </div>
+                </template>
+
+                <!-- 2. Savings Grouped by Provider in Block -->
+                <template x-for="grp in (cartOptimization?.savingsByProvider || [])" :key="'sav_' + grp.targetProvider">
+                  <div class="p-2.5 bg-emerald-50/90 border border-emerald-200 rounded-lg flex flex-col gap-1.5">
+                    <div class="flex items-center justify-between gap-2">
+                      <div class="min-w-0">
+                        <div class="text-[11px] font-extrabold text-emerald-950 flex items-center gap-1 flex-wrap">
+                          <span>💰 Ahorrá <span class="text-emerald-700" x-text="formatCurrency(grp.totalSaving)"></span></span>
+                          <span>pasando <span x-text="grp.swaps.length"></span> <span x-text="grp.swaps.length === 1 ? 'ítem' : 'ítems'"></span> a</span>
+                          <span class="text-[9px] font-bold px-1.5 py-0.2 rounded text-white" :class="getProviderBadgeClass(grp.targetProvider)" x-text="grp.targetProvider"></span>
+                        </div>
+                      </div>
+                      <button 
+                        @click="applyProviderSwaps(grp.swaps, 'Ahorro en ' + grp.targetProvider)" 
+                        class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-[11px] shrink-0 transition shadow-xs"
+                      >
+                        Aplicar
+                      </button>
+                    </div>
+                    <div class="flex flex-col gap-1 border-t border-emerald-200/60 pt-1">
+                      <template x-for="sw in grp.swaps" :key="sw.itemId + '_' + sw.toUid">
+                        <div class="flex items-center justify-between text-[10px] text-slate-600 gap-2">
+                          <span class="truncate" x-text="sw.quantity + 'x ' + sw.fromName + ' (' + shortProviderName(sw.fromProvider) + ')'"></span>
+                          <span class="font-bold text-emerald-700 whitespace-nowrap" x-text="'-' + formatCurrency(sw.saving)"></span>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+                </template>
+
+                <!-- 3. Logistic Consolidation -->
+                <template x-for="con in (cartOptimization?.consolidations || [])" :key="'con_' + con.targetProvider">
+                  <div class="p-2 bg-white border border-indigo-200 rounded-lg flex items-center justify-between gap-2">
+                    <div class="min-w-0 flex-1">
+                      <div class="text-[11px] font-bold text-slate-800 flex items-center gap-1 flex-wrap">
+                        <span>📦 Unificar <span x-text="con.movableCount"></span> <span x-text="con.movableCount === 1 ? 'ítem' : 'ítems'"></span> en</span>
+                        <span class="text-[9px] font-bold px-1.5 py-0.2 rounded text-white" :class="getProviderBadgeClass(con.targetProvider)" x-text="con.targetProvider"></span>
+                      </div>
+                      <div class="text-[10px] mt-0.5" :class="con.priceDelta <= 0 ? 'text-emerald-700 font-semibold' : 'text-amber-700 font-medium'">
+                        <span x-text="con.priceDelta <= 0 ? ('Ahorrás ' + formatCurrency(Math.abs(con.priceDelta)) + ' y reducís proveedores') : ('Diferencia: +' + formatCurrency(con.priceDelta) + ' por comprar en un solo lugar')"></span>
+                      </div>
+                    </div>
+                    <button 
+                      @click="applyProviderSwaps(con.moves, 'Unificado en ' + con.targetProvider)" 
+                      class="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-[11px] shrink-0 transition"
+                    >
+                      Unificar
+                    </button>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
           <template x-if="!currentCart || currentCart.items.length === 0">
             <div class="text-center py-16 text-slate-400">
               <div class="text-4xl mb-2">🛒</div>
@@ -955,6 +1205,15 @@
         carts: [],
         activeCartId: null,
         currentCart: null,
+        cartOptimization: null,
+        optimizerExpanded: true,
+        lastCartSnapshot: null,
+
+        // Admin Linking (Solo eugenioazurmendi@gmail.com)
+        adminLinkOpen: false,
+        adminLinkQuery: '',
+        adminLinkResults: [],
+        adminLinkLoading: false,
 
         // Autenticación (Better Auth)
         currentUser: null,
@@ -1180,6 +1439,26 @@
           return transparent ? 'bg-slate-700/90 text-white' : 'bg-slate-700 text-white';
         },
 
+        getProviderDotClass(provider) {
+          if (provider === 'Paternal SRL') return 'bg-blue-600';
+          if (provider === 'Electro Tucumán') return 'bg-amber-500';
+          if (provider === 'Electrocity') return 'bg-purple-600';
+          if (provider === 'Jalux') return 'bg-red-600';
+          if (provider === 'Adma Distribuidora') return 'bg-emerald-600';
+          return 'bg-slate-600';
+        },
+
+        shortProviderName(provider) {
+          if (provider === 'Paternal SRL') return 'Paternal';
+          if (provider === 'Electro Tucumán') return 'E. Tucumán';
+          if (provider === 'Adma Distribuidora') return 'Adma';
+          return provider || '';
+        },
+
+        isAdminUser() {
+          return String(this.currentUser?.email || '').trim().toLowerCase() === 'eugenioazurmendi@gmail.com';
+        },
+
         async setProvider(name) {
           this.selectedProvider = name;
           await this.loadCategories();
@@ -1256,6 +1535,9 @@
           this.modalProduct = p;
           this.modalActiveImage = p.image_url;
           this.modalQty = 1;
+          this.adminLinkOpen = false;
+          this.adminLinkQuery = '';
+          this.adminLinkResults = [];
           if (p.variations && p.variations.length > 0) {
             this.selectVariation(p.variations[0], p.price);
           } else {
@@ -1263,6 +1545,107 @@
             this.modalSelectedPrice = p.price;
           }
           this.modalOpen = true;
+        },
+
+        async switchModalToOffer(uid) {
+          if (!uid || this.modalProduct?.uid === uid) return;
+          try {
+            const res = await fetch(`/api/product/${encodeURIComponent(uid)}`);
+            if (!res.ok) return;
+            const fullProd = await res.json();
+            this.openProductModal(fullProd);
+          } catch (e) {
+            console.error('Error cargando oferta', e);
+          }
+        },
+
+        async addOfferDirectlyToCart(of) {
+          await this.addItemToCart({
+            provider: of.provider,
+            product_uid: of.uid,
+            product_id: of.id,
+            variation_id: null,
+            name: of.name,
+            variant_label: '',
+            sku: of.sku,
+            price: of.price,
+            quantity: this.modalQty || 1,
+            image_url: of.image_url || this.modalProduct?.image_url || '',
+            permalink: of.permalink
+          });
+        },
+
+        async searchAdminLinkCandidates() {
+          if (!this.isAdminUser()) return;
+          const q = this.adminLinkQuery.trim();
+          if (q.length < 2) {
+            this.adminLinkResults = [];
+            return;
+          }
+          this.adminLinkLoading = true;
+          try {
+            const params = new URLSearchParams({ q, raw: '1', limit: '10' });
+            const res = await fetch(`/api/search?${params}`);
+            const data = await res.json();
+            const existingUids = new Set((this.modalProduct?.offers || [{ uid: this.modalProduct?.uid }]).map(o => o.uid));
+            this.adminLinkResults = (data.products || []).filter(c => !existingUids.has(c.uid));
+          } catch (e) {
+            console.error('Error buscando candidatos para vincular', e);
+          } finally {
+            this.adminLinkLoading = false;
+          }
+        },
+
+        async adminLinkWith(targetUid) {
+          if (!this.isAdminUser() || !this.modalProduct?.uid || !targetUid) return;
+          try {
+            const res = await fetch('/api/admin/link', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({ uidA: this.modalProduct.uid, uidB: targetUid })
+            });
+            if (!res.ok) {
+              const err = await res.json().catch(() => ({}));
+              return alert(err.error || 'Error al vincular');
+            }
+            this.showToast('Productos vinculados para toda la app', '🔗');
+            const refreshed = await fetch(`/api/product/${encodeURIComponent(this.modalProduct.uid)}`);
+            if (refreshed.ok) {
+              this.modalProduct = await refreshed.json();
+            }
+            await this.searchAdminLinkCandidates();
+            await this.performSearch(1);
+            await this.loadCartOptimization();
+          } catch (e) {
+            alert('No se pudo vincular el producto');
+          }
+        },
+
+        async adminUnlinkOffer(uid) {
+          if (!this.isAdminUser() || !uid) return;
+          if (!confirm('¿Desvincular este producto del grupo para toda la app?')) return;
+          try {
+            const res = await fetch('/api/admin/unlink', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({ uid })
+            });
+            if (!res.ok) return alert('Error al desvincular');
+            this.showToast('Producto desvinculado globalmente', '✂️');
+            const keepUid = uid === this.modalProduct?.uid
+              ? (this.modalProduct?.offers?.find(o => o.uid !== uid)?.uid || uid)
+              : this.modalProduct?.uid;
+            const refreshed = await fetch(`/api/product/${encodeURIComponent(keepUid)}`);
+            if (refreshed.ok) {
+              this.modalProduct = await refreshed.json();
+            }
+            await this.performSearch(1);
+            await this.loadCartOptimization();
+          } catch (e) {
+            alert('No se pudo desvincular el producto');
+          }
         },
 
         selectVariation(v, fallbackPrice = 0) {
@@ -1366,8 +1749,110 @@
           try {
             const res = await fetch(`/api/carts/${this.activeCartId}`);
             this.currentCart = await res.json();
+            await this.loadCartOptimization();
           } catch (e) {
             console.error('Error cargando detalle de carrito', e);
+          }
+        },
+
+        async loadCartOptimization() {
+          if (!this.activeCartId || !this.currentCart?.items?.length) {
+            this.cartOptimization = null;
+            return;
+          }
+          try {
+            const res = await fetch(`/api/carts/${this.activeCartId}/optimize`);
+            if (res.ok) {
+              this.cartOptimization = await res.json();
+            }
+          } catch (e) {
+            console.error('Error analizando optimización de carrito', e);
+          }
+        },
+
+        hasOptimizationSuggestions() {
+          if (!this.cartOptimization) return false;
+          return (
+            (this.cartOptimization.stockAlerts && this.cartOptimization.stockAlerts.length > 0) ||
+            (this.cartOptimization.savingsByProvider && this.cartOptimization.savingsByProvider.length > 0) ||
+            (this.cartOptimization.consolidations && this.cartOptimization.consolidations.length > 0)
+          );
+        },
+
+        async applySingleSwap(sw) {
+          await this.applyProviderSwaps([sw], `Cambiado a ${sw.toProvider}`);
+        },
+
+        async applyProviderSwaps(swaps, toastMsg = 'Optimización aplicada') {
+          if (!this.currentCart?.items?.length || !Array.isArray(swaps) || !swaps.length) return;
+          this.lastCartSnapshot = JSON.parse(JSON.stringify(this.currentCart.items));
+
+          const swapByItemId = new Map(swaps.map(s => [Number(s.itemId), s]));
+          const mergedMap = new Map();
+
+          for (const it of this.currentCart.items) {
+            const sw = swapByItemId.get(Number(it.id));
+            const nextItem = sw
+              ? {
+                  provider: sw.toProvider,
+                  product_uid: sw.toUid,
+                  product_id: sw.toProductId,
+                  variation_id: null,
+                  name: sw.toName,
+                  variant_label: '',
+                  sku: sw.toSku,
+                  price: sw.toPrice,
+                  quantity: Number(it.quantity || 1),
+                  image_url: sw.toImageUrl || it.image_url,
+                  permalink: sw.toPermalink
+                }
+              : {
+                  provider: it.provider,
+                  product_uid: it.product_uid,
+                  product_id: it.product_id,
+                  variation_id: it.variation_id,
+                  name: it.name,
+                  variant_label: it.variant_label,
+                  sku: it.sku,
+                  price: it.price,
+                  quantity: Number(it.quantity || 1),
+                  image_url: it.image_url,
+                  permalink: it.permalink
+                };
+
+            const key = `${nextItem.product_uid}__${nextItem.variation_id || ''}`;
+            if (mergedMap.has(key)) {
+              mergedMap.get(key).quantity += nextItem.quantity;
+            } else {
+              mergedMap.set(key, nextItem);
+            }
+          }
+
+          const res = await fetch(`/api/carts/${this.activeCartId}/items-batch`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ items: Array.from(mergedMap.values()) })
+          });
+          if (res.ok) {
+            this.currentCart = await res.json();
+            await this.loadCarts();
+            this.showToast(toastMsg, '✨');
+          }
+        },
+
+        async undoCartOptimization() {
+          if (!this.lastCartSnapshot || !this.activeCartId) return;
+          const snapshot = this.lastCartSnapshot;
+          this.lastCartSnapshot = null;
+          const res = await fetch(`/api/carts/${this.activeCartId}/items-batch`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ items: snapshot })
+          });
+          if (res.ok) {
+            this.currentCart = await res.json();
+            await this.loadCarts();
+            this.showToast('Cambios revertidos al estado anterior', '↩️');
           }
         },
 
@@ -1499,6 +1984,8 @@
           try {
             const res = await fetch(`/api/carts/${this.activeCartId}/clear`, { method: 'POST' });
             this.currentCart = await res.json();
+            this.lastCartSnapshot = null;
+            this.cartOptimization = null;
             await this.loadCarts();
             this.showToast('Carrito vaciado');
           } catch (e) {

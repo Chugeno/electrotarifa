@@ -17,6 +17,7 @@ from typing import List, Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from database import init_db, upsert_products_batch, get_providers_summary
+from brand_normalizer import extract_brand_from_product, canon_brand
 from scraper_tucuman import run_scraper_tucuman
 from scraper_electrocity import run_scraper_electrocity
 from scraper_jalux import scrape_jalux
@@ -65,7 +66,13 @@ def process_paternal_item(item: Dict[str, Any]) -> Dict[str, Any]:
         "id": prod_id,
         "sku": (item.get("sku") or "").strip(),
         "name": html.unescape(item.get("name") or "").strip(),
-        "brand": "",
+        "brand": extract_brand_from_product(
+            item.get("name") or "",
+            categories_text,
+            item.get("short_description") or "",
+            item.get("description") or "",
+            "",
+        ),
         "slug": item.get("slug") or "",
         "type": item.get("type") or "simple",
         "price": price,

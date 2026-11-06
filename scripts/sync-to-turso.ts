@@ -68,6 +68,21 @@ async function main() {
   console.log("📦 Sincronizando productos…");
   await copyTable("products", "upsert");
 
+  console.log("🔍 Reconstruyendo índice FTS5 en Turso…");
+  await remote.execute("INSERT INTO products_fts(products_fts) VALUES('rebuild')");
+
+  console.log("🔗 Sincronizando vínculos de productos (product_links)…");
+  await remote.execute(`
+    CREATE TABLE IF NOT EXISTS product_links (
+      uid TEXT PRIMARY KEY,
+      group_key TEXT NOT NULL,
+      source TEXT DEFAULT 'auto',
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  await remote.execute("CREATE INDEX IF NOT EXISTS idx_product_links_group ON product_links(group_key)");
+  await copyTable("product_links", "insert-ignore");
+
   const [l, r] = await Promise.all([
     local.execute("SELECT COUNT(*) AS n FROM products"),
     remote.execute("SELECT COUNT(*) AS n FROM products"),
