@@ -3,7 +3,7 @@ import { cors } from "hono/cors";
 import { auth } from "./auth.js";
 import * as db from "./db.js";
 
-const app = new Hono();
+const app = new Hono<{ Bindings: { CATALOG_BUCKET?: any } }>();
 
 // CORS & Preflight (restringido al dominio oficial; localhost solo en dev)
 const ALLOWED_ORIGINS = new Set([
@@ -41,6 +41,64 @@ async function getUserSession(c: any) {
 
 // ----------------- Public Catalog API -----------------
 
+app.get("/api/catalog-version", async (c) => {
+  c.header("Cache-Control", "no-store");
+  if (c.env?.CATALOG_BUCKET) {
+    try {
+      const obj = await c.env.CATALOG_BUCKET.get("version.json");
+      if (obj) return c.json(await obj.json());
+    } catch (e) {
+      console.error("R2 version.json read error:", e);
+    }
+  }
+  return c.json(await db.getCatalogVersion());
+});
+
+app.get("/api/catalog-links", async (c) => {
+  c.header("Cache-Control", "no-store");
+  if (c.env?.CATALOG_BUCKET) {
+    try {
+      const obj = await c.env.CATALOG_BUCKET.get("links.json");
+      if (obj) {
+        return new Response(obj.body, {
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            "Cache-Control": "no-store",
+          },
+        });
+      }
+    } catch (e) {
+      console.error("R2 links.json read error:", e);
+    }
+  }
+  return c.json(await db.getAllActiveLinks());
+});
+
+app.get("/api/catalog-snapshot", async (c) => {
+  if (c.env?.CATALOG_BUCKET) {
+    try {
+      const obj = await c.env.CATALOG_BUCKET.get("catalog.json.gz");
+      if (obj) {
+        const hasV = Boolean(c.req.query("v"));
+        const cacheControl = hasV ? "public, max-age=31536000, immutable" : "public, max-age=300";
+        return new Response(obj.body, {
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            "Content-Encoding": "gzip",
+            "Cache-Control": cacheControl,
+          },
+          encodeBody: "manual",
+        } as any);
+      }
+    } catch (e) {
+      console.error("R2 catalog.json.gz read error:", e);
+    }
+  }
+  c.header("Cache-Control", "public, max-age=60");
+  const snapshot = await db.buildCatalogSnapshot();
+  return c.json(snapshot);
+});
+
 // API: Search products
 app.get("/api/search", async (c) => {
   const query = c.req.query("q") || "";
@@ -72,6 +130,41 @@ async function isAdmin(c: any): Promise<boolean> {
   return email === ADMIN_EMAIL;
 }
 
+async function syncR2Links(bucket: any) {
+  if (!bucket) return;
+  try {
+    const [links, prevObj] = await Promise.all([
+      db.getAllActiveLinks(),
+      bucket.get("version.json").catch(() => null),
+    ]);
+    let prev: any = {};
+    if (prevObj) {
+      try {
+        prev = (await prevObj.json()) || {};
+      } catch {
+        prev = {};
+      }
+    }
+    const linksVersion = new Date().toISOString();
+    await Promise.all([
+      bucket.put("links.json", JSON.stringify(links), {
+        httpMetadata: { contentType: "application/json" },
+      }),
+      bucket.put(
+        "version.json",
+        JSON.stringify({
+          version: prev?.version || linksVersion,
+          linksVersion,
+          count: prev?.count || 0,
+        }),
+        { httpMetadata: { contentType: "application/json" } }
+      ),
+    ]);
+  } catch (e) {
+    console.error("Error syncing R2 links:", e);
+  }
+}
+
 app.post("/api/admin/link", async (c) => {
   if (!(await isAdmin(c))) {
     return c.json({ error: "Solo el administrador puede vincular productos" }, 403);
@@ -79,6 +172,7 @@ app.post("/api/admin/link", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const res = await db.linkProducts(String(body.uidA || ""), String(body.uidB || ""));
   if ((res as any).error) return c.json(res, 400);
+  await syncR2Links(c.env?.CATALOG_BUCKET);
   return c.json(res);
 });
 
@@ -89,6 +183,7 @@ app.post("/api/admin/unlink", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const res = await db.unlinkProduct(String(body.uid || ""));
   if ((res as any).error) return c.json(res, 400);
+  await syncR2Links(c.env?.CATALOG_BUCKET);
   return c.json(res);
 });
 

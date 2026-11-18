@@ -17,3 +17,7 @@ BETTER_AUTH_URL = "https://electrotarifa.eugenioazurmendi.com.ar"
 DATABASE_URL = "libsql://electrotarifa-eugenioazurmendi.aws-us-east-1.turso.io"
 BREVO_SENDER_EMAIL = "eugenioazurmendi@gmail.com"
 # Secretos (NO van aquí): npx wrangler secret put DATABASE_AUTH_TOKEN / BETTER_AUTH_SECRET / BREVO_API_KEY
+
+[[r2_buckets]]
+binding = "CATALOG_BUCKET"
+bucket_name = "electrotarifa-catalog"

@@ -1202,6 +1202,8 @@
         loading: false,
         loadingMore: false,
         scrolledDown: false,
+        _localCatalog: null,
+        _catalogSyncPromise: null,
 
         // Modales y Drawer
         modalOpen: false,
@@ -1264,12 +1266,35 @@
             window.history.replaceState({}, '', window.location.pathname);
           }
 
-          await Promise.all([
-            this.performSearch(1),
-            this.loadProviders(),
-            this.loadCategories(),
-            this.checkSession().then(() => this.loadCarts()),
-          ]);
+          if (this.isDesktopClient()) {
+            this.loading = true;
+            const cached = await this.idbReadSnapshot();
+            if (cached && Array.isArray(cached.products) && cached.products.length > 0) {
+              this.hydrateLocalCatalog(cached);
+              this.syncLocalCatalogInBackground(cached.version, cached.linksVersion);
+              await Promise.all([
+                this.performSearch(1),
+                this.loadProviders(),
+                this.loadCategories(),
+                this.checkSession().then(() => this.loadCarts()),
+              ]);
+            } else {
+              this.downloadAndStoreCatalogSnapshot();
+              await Promise.all([
+                this.performSearch(1),
+                this.loadProviders(),
+                this.loadCategories(),
+                this.checkSession().then(() => this.loadCarts()),
+              ]);
+            }
+          } else {
+            await Promise.all([
+              this.performSearch(1),
+              this.loadProviders(),
+              this.loadCategories(),
+              this.checkSession().then(() => this.loadCarts()),
+            ]);
+          }
 
           // Escuchar scroll para el botón flotante "Volver arriba"
           window.addEventListener('scroll', () => {
@@ -1278,6 +1303,614 @@
 
           // Configurar IntersectionObserver para Scroll Infinito
           this.setupInfiniteScroll();
+        },
+
+        isDesktopClient() {
+          return window.innerWidth >= 1024
+            && !(window.matchMedia && window.matchMedia('(pointer: coarse)').matches)
+            && !/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+        },
+
+        normText(s) {
+          return String(s || '')
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '');
+        },
+
+        openCatalogDb() {
+          return new Promise((resolve, reject) => {
+            try {
+              if (typeof indexedDB === 'undefined') {
+                return reject(new Error('IndexedDB unavailable'));
+              }
+              const req = indexedDB.open('electrotarifa_local_db', 1);
+              req.onupgradeneeded = (event) => {
+                const db = event.target.result;
+                if (!db.objectStoreNames.contains('catalog')) {
+                  db.createObjectStore('catalog');
+                }
+              };
+              req.onsuccess = (event) => resolve(event.target.result);
+              req.onerror = () => reject(req.error || new Error('IndexedDB open error'));
+              req.onblocked = () => reject(new Error('IndexedDB blocked'));
+            } catch (e) {
+              reject(e);
+            }
+          });
+        },
+
+        async idbReadSnapshot() {
+          let db;
+          try {
+            db = await this.openCatalogDb();
+            return await new Promise((resolve) => {
+              try {
+                const tx = db.transaction('catalog', 'readonly');
+                const store = tx.objectStore('catalog');
+                const req = store.get('snapshot');
+                req.onsuccess = () => {
+                  const val = req.result;
+                  if (val && typeof val === 'object' && Array.isArray(val.products)) {
+                    resolve({
+                      version: val.version ?? null,
+                      linksVersion: val.linksVersion ?? null,
+                      products: val.products,
+                      links: Array.isArray(val.links) ? val.links : [],
+                    });
+                  } else {
+                    resolve(null);
+                  }
+                };
+                req.onerror = () => resolve(null);
+                tx.onerror = () => resolve(null);
+                tx.onabort = () => resolve(null);
+              } catch (e) {
+                resolve(null);
+              }
+            });
+          } catch (e) {
+            return null;
+          } finally {
+            try { db?.close(); } catch (_) {}
+          }
+        },
+
+        async idbWriteSnapshot(snapshot) {
+          if (!snapshot || !Array.isArray(snapshot.products)) return false;
+          let db;
+          try {
+            const rawSnap = (typeof Alpine !== 'undefined' && typeof Alpine.raw === 'function')
+              ? Alpine.raw(snapshot)
+              : snapshot;
+            const payload = {
+              version: rawSnap.version ?? null,
+              linksVersion: rawSnap.linksVersion ?? null,
+              products: rawSnap.products,
+              links: Array.isArray(rawSnap.links) ? rawSnap.links : [],
+            };
+            db = await this.openCatalogDb();
+            return await new Promise((resolve) => {
+              try {
+                const tx = db.transaction('catalog', 'readwrite');
+                const store = tx.objectStore('catalog');
+                const req = store.put(payload, 'snapshot');
+                req.onsuccess = () => resolve(true);
+                req.onerror = () => resolve(false);
+                tx.onerror = () => resolve(false);
+                tx.onabort = () => resolve(false);
+              } catch (e) {
+                resolve(false);
+              }
+            });
+          } catch (e) {
+            return false;
+          } finally {
+            try { db?.close(); } catch (_) {}
+          }
+        },
+
+        hydrateLocalCatalog(snapshot) {
+          if (!snapshot || !Array.isArray(snapshot.products)) return null;
+
+          const products = new Array(snapshot.products.length);
+          const byUid = new Map();
+          const byProvider = new Map();
+          const providerCounts = new Map();
+          const catsAllSet = new Set();
+          const catsByProvSets = new Map();
+
+          for (let i = 0; i < snapshot.products.length; i++) {
+            const raw = snapshot.products[i];
+            const price = Number(raw.price || 0);
+            const ivaRate = Number(raw.iva_rate || 21);
+            let priceNeto = Number(raw.price_neto || 0);
+            let ivaAmount = Number(raw.iva_amount || 0);
+            if (!priceNeto && price > 0) {
+              priceNeto = Math.round((price / (1 + ivaRate / 100)) * 100) / 100;
+            }
+            if (!ivaAmount && price > 0) {
+              ivaAmount = Math.round((price - priceNeto) * 100) / 100;
+            }
+
+            let variations = [];
+            if (Array.isArray(raw.variations)) {
+              variations = raw.variations;
+            } else if (raw.variations_json && raw.variations_json !== '[]') {
+              try {
+                const parsed = JSON.parse(raw.variations_json);
+                if (Array.isArray(parsed)) variations = parsed;
+              } catch (_) {
+                variations = [];
+              }
+            }
+
+            const { variations_json, _skuLower, _catLower, _norm, _normSku, ...rest } = raw;
+            const provider = String(raw.provider ?? '');
+            const sku = String(raw.sku ?? '');
+            const name = String(raw.name ?? '');
+            const brand = String(raw.brand ?? '');
+            const categoriesText = String(raw.categories_text ?? '');
+
+            const prod = {
+              ...rest,
+              uid: String(raw.uid ?? ''),
+              provider,
+              id: Number(raw.id || 0),
+              sku,
+              name,
+              brand,
+              categories_text: categoriesText,
+              image_url: String(raw.image_url ?? ''),
+              permalink: String(raw.permalink ?? ''),
+              is_in_stock: Number(raw.is_in_stock || 0),
+              price,
+              price_neto: priceNeto,
+              iva_rate: ivaRate,
+              iva_amount: ivaAmount,
+              variations,
+            };
+
+            const skuLower = sku.toLowerCase();
+            const catLower = categoriesText.toLowerCase();
+            const normAll = this.normText(`${name} ${sku} ${brand} ${categoriesText} ${provider}`);
+            const normSku = this.normText(sku);
+
+            Object.defineProperties(prod, {
+              _skuLower: { value: skuLower, enumerable: false, configurable: true },
+              _catLower: { value: catLower, enumerable: false, configurable: true },
+              _norm: { value: normAll, enumerable: false, configurable: true },
+              _normSku: { value: normSku, enumerable: false, configurable: true },
+            });
+
+            products[i] = prod;
+          }
+
+          products.sort((a, b) => {
+            const aHasP = a.price > 0 ? 1 : 0;
+            const bHasP = b.price > 0 ? 1 : 0;
+            if (aHasP !== bHasP) return bHasP - aHasP;
+            if (a.is_in_stock !== b.is_in_stock) return b.is_in_stock - a.is_in_stock;
+            return a.price - b.price;
+          });
+
+          for (let i = 0; i < products.length; i++) {
+            const prod = products[i];
+            byUid.set(prod.uid, prod);
+
+            let provList = byProvider.get(prod.provider);
+            if (!provList) {
+              provList = [];
+              byProvider.set(prod.provider, provList);
+            }
+            provList.push(prod);
+
+            providerCounts.set(prod.provider, (providerCounts.get(prod.provider) || 0) + 1);
+
+            if (prod.categories_text) {
+              let provCatSet = catsByProvSets.get(prod.provider);
+              if (!provCatSet) {
+                provCatSet = new Set();
+                catsByProvSets.set(prod.provider, provCatSet);
+              }
+              const parts = prod.categories_text.split(' | ');
+              for (let j = 0; j < parts.length; j++) {
+                const clean = parts[j].trim();
+                if (clean) {
+                  catsAllSet.add(clean);
+                  provCatSet.add(clean);
+                }
+              }
+            }
+          }
+
+          const providersSummary = Array.from(providerCounts.entries())
+            .map(([provider, count]) => ({ provider, count }))
+            .sort((a, b) => b.count - a.count);
+
+          const categoriesAll = Array.from(catsAllSet).sort();
+          const categoriesByProvider = new Map();
+          for (const [prov, set] of catsByProvSets) {
+            categoriesByProvider.set(prov, Array.from(set).sort());
+          }
+
+          const links = Array.isArray(snapshot.links) ? snapshot.links : [];
+          Object.defineProperty(products, '__v_skip', { value: true, enumerable: false, configurable: true });
+          const rawSnapshot = {
+            version: snapshot.version ?? null,
+            linksVersion: snapshot.linksVersion ?? null,
+            products,
+            links,
+          };
+          Object.defineProperty(rawSnapshot, '__v_skip', { value: true, enumerable: false, configurable: true });
+
+          const catalog = {
+            version: snapshot.version ?? null,
+            linksVersion: snapshot.linksVersion ?? null,
+            rawSnapshot,
+            products,
+            byUid,
+            byProvider,
+            categoriesAll,
+            categoriesByProvider,
+            providersSummary,
+            uidToGroup: new Map(),
+            byGroup: new Map(),
+            offersByGroup: new Map(),
+          };
+          Object.defineProperty(catalog, '__v_skip', { value: true, enumerable: false, configurable: true });
+
+          this._localCatalog = catalog;
+          this.rebuildLocalLinks(links);
+          return catalog;
+        },
+
+        rebuildLocalLinks(linksInput) {
+          const cat = this._localCatalog;
+          if (!cat) return;
+
+          const links = Array.isArray(linksInput)
+            ? linksInput
+            : (Array.isArray(linksInput?.links) ? linksInput.links : []);
+
+          const uidToGroup = new Map();
+          const groupEntries = new Map();
+
+          for (let i = 0; i < links.length; i++) {
+            const l = links[i];
+            if (!l) continue;
+            const uid = String(Array.isArray(l) ? l[0] : (l.uid || ''));
+            const gk = String(Array.isArray(l) ? l[1] : (l.group_key || ''));
+            const src = String(Array.isArray(l) ? (l[2] || 'auto') : (l.source || l.link_source || 'auto'));
+            if (!uid || !gk || src === 'unlinked' || uidToGroup.has(uid)) continue;
+            const prod = cat.byUid.get(uid);
+            if (!prod) continue;
+            uidToGroup.set(uid, gk);
+            let arr = groupEntries.get(gk);
+            if (!arr) {
+              arr = [];
+              groupEntries.set(gk, arr);
+            }
+            arr.push({ prod, source: src });
+          }
+
+          const byGroup = new Map();
+          const offersByGroup = new Map();
+
+          for (const [gk, entries] of groupEntries) {
+            entries.sort((ea, eb) => {
+              const a = ea.prod;
+              const b = eb.prod;
+              const aOk = a.is_in_stock > 0 && a.price > 0 ? 1 : 0;
+              const bOk = b.is_in_stock > 0 && b.price > 0 ? 1 : 0;
+              if (aOk !== bOk) return bOk - aOk;
+              const aHasP = a.price > 0 ? 1 : 0;
+              const bHasP = b.price > 0 ? 1 : 0;
+              if (aHasP !== bHasP) return bHasP - aHasP;
+              return a.price - b.price;
+            });
+
+            byGroup.set(gk, entries.map(e => e.prod));
+
+            if (entries.length > 1) {
+              offersByGroup.set(gk, entries.map(({ prod: s, source }) => ({
+                uid: s.uid,
+                provider: s.provider,
+                id: s.id,
+                sku: s.sku,
+                name: s.name,
+                brand: s.brand,
+                price: s.price,
+                price_neto: s.price_neto,
+                iva_rate: s.iva_rate,
+                iva_amount: s.iva_amount,
+                is_in_stock: s.is_in_stock,
+                permalink: s.permalink,
+                image_url: s.image_url,
+                source: source || 'auto',
+              })));
+            }
+          }
+
+          cat.uidToGroup = uidToGroup;
+          cat.byGroup = byGroup;
+          cat.offersByGroup = offersByGroup;
+          if (cat.rawSnapshot) {
+            cat.rawSnapshot.links = links;
+          }
+        },
+
+        enrichLocalProducts(items, collapseGroups = true) {
+          const cat = this._localCatalog;
+          if (!cat || !items || !items.length) return items || [];
+
+          const out = [];
+          const seenGroups = new Set();
+
+          for (let i = 0; i < items.length; i++) {
+            const p = items[i];
+            const gk = cat.uidToGroup.get(p.uid);
+            if (!gk) {
+              out.push(p);
+              continue;
+            }
+            const siblings = cat.byGroup.get(gk);
+            const offers = cat.offersByGroup.get(gk);
+            if (!siblings || siblings.length <= 1 || !offers) {
+              out.push(p);
+              continue;
+            }
+
+            if (collapseGroups) {
+              if (seenGroups.has(gk)) continue;
+              seenGroups.add(gk);
+              const best = { ...siblings[0] };
+              if (!best.image_url) {
+                const withImg = siblings.find(s => s.image_url);
+                if (withImg) best.image_url = withImg.image_url;
+              }
+              best.group_key = gk;
+              best.offers = offers;
+              out.push(best);
+            } else {
+              out.push({
+                ...p,
+                group_key: gk,
+                offers,
+              });
+            }
+          }
+          return out;
+        },
+
+        queryLocalCatalog({ query = '', provider = '', category = '', limit = 40, offset = 0, collapseGroups } = {}) {
+          const cat = this._localCatalog;
+          if (!cat) return { total: 0, exactTotal: true, hasMore: false, products: [] };
+
+          const cleanedQ = String(query || '').trim();
+          const prov = String(provider || '').trim();
+          const catLower = String(category || '').trim().toLowerCase();
+          const safeLimit = Math.max(1, Number(limit) || 40);
+          const safeOffset = Math.max(0, Number(offset) || 0);
+          const shouldCollapse = collapseGroups === undefined ? !prov : Boolean(collapseGroups);
+
+          const sourceList = prov ? (cat.byProvider.get(prov) || []) : cat.products;
+          let matched = [];
+
+          if (cleanedQ) {
+            const qLower = cleanedQ.toLowerCase();
+            const qNorm = this.normText(cleanedQ);
+            const tokens = qNorm
+              .split(/\s+/)
+              .map(t => t.replace(/["'*]/g, '').trim())
+              .filter(Boolean);
+
+            const seenUids = new Set();
+            const seenGroups = new Set();
+
+            const tryPush = (p) => {
+              if (seenUids.has(p.uid)) return;
+              if (shouldCollapse) {
+                const gk = cat.uidToGroup.get(p.uid);
+                if (gk) {
+                  const siblings = cat.byGroup.get(gk);
+                  if (siblings && siblings.length > 1) {
+                    if (seenGroups.has(gk)) return;
+                    seenGroups.add(gk);
+                  }
+                }
+              }
+              seenUids.add(p.uid);
+              matched.push(p);
+            };
+
+            for (let i = 0; i < sourceList.length; i++) {
+              const p = sourceList[i];
+              if (p._skuLower === qLower || p._normSku === qNorm) {
+                tryPush(p);
+              }
+            }
+
+            for (let i = 0; i < sourceList.length; i++) {
+              const p = sourceList[i];
+              if (catLower && !p._catLower.includes(catLower)) continue;
+              if (tokens.length > 0) {
+                let allMatch = true;
+                for (let j = 0; j < tokens.length; j++) {
+                  if (!p._norm.includes(tokens[j])) {
+                    allMatch = false;
+                    break;
+                  }
+                }
+                if (!allMatch) continue;
+              }
+              tryPush(p);
+            }
+          } else {
+            if (!catLower && !shouldCollapse) {
+              matched = sourceList;
+            } else {
+              const seenGroups = new Set();
+              for (let i = 0; i < sourceList.length; i++) {
+                const p = sourceList[i];
+                if (catLower && !p._catLower.includes(catLower)) continue;
+                if (shouldCollapse) {
+                  const gk = cat.uidToGroup.get(p.uid);
+                  if (gk) {
+                    const siblings = cat.byGroup.get(gk);
+                    if (siblings && siblings.length > 1) {
+                      if (seenGroups.has(gk)) continue;
+                      seenGroups.add(gk);
+                    }
+                  }
+                }
+                matched.push(p);
+              }
+            }
+          }
+
+          const pageSlice = matched.slice(safeOffset, safeOffset + safeLimit);
+          const enriched = this.enrichLocalProducts(pageSlice, shouldCollapse);
+          return {
+            total: matched.length,
+            exactTotal: true,
+            hasMore: safeOffset + safeLimit < matched.length,
+            products: enriched,
+          };
+        },
+
+        async applyUpdatedLocalLinks(links, linksVersion) {
+          const cat = this._localCatalog;
+          if (!cat || !Array.isArray(links)) return;
+          this.rebuildLocalLinks(links);
+          if (linksVersion) {
+            cat.linksVersion = linksVersion;
+            if (cat.rawSnapshot) cat.rawSnapshot.linksVersion = linksVersion;
+          }
+          if (cat.rawSnapshot) {
+            await this.idbWriteSnapshot(cat.rawSnapshot);
+          }
+        },
+
+        async refreshLocalLinksFromServer() {
+          if (!this._localCatalog) return false;
+          try {
+            const res = await fetch('/api/catalog-links', { cache: 'no-store' });
+            if (!res.ok) return false;
+            const data = await res.json();
+            const nextLinks = Array.isArray(data)
+              ? data
+              : (Array.isArray(data?.links) ? data.links : null);
+            if (!nextLinks) return false;
+            const nextLinksVer = data?.linksVersion || data?.version || this._localCatalog.linksVersion;
+            await this.applyUpdatedLocalLinks(nextLinks, nextLinksVer);
+            return true;
+          } catch (e) {
+            return false;
+          }
+        },
+
+        applySearchPaginationState(data) {
+          this.totalResults = data.total;
+          this.exactTotal = data.exactTotal !== false;
+          this.hasMore = Boolean(data.hasMore);
+          this.totalPages = data.hasMore
+            ? (this.currentPage + 1)
+            : (data.exactTotal === false ? this.currentPage : Math.ceil(data.total / this.limit));
+        },
+
+        async fetchAndStoreSnapshot(remote) {
+          const snapUrl = remote?.version
+            ? `/api/catalog-snapshot?v=${encodeURIComponent(remote.version)}`
+            : '/api/catalog-snapshot';
+          const snapRes = await fetch(snapUrl);
+          if (!snapRes.ok) return false;
+          const snap = await snapRes.json();
+          if (!snap || !Array.isArray(snap.products) || snap.products.length === 0) return false;
+          if (!snap.version && remote?.version) snap.version = remote.version;
+          if (!snap.linksVersion && remote?.linksVersion) snap.linksVersion = remote.linksVersion;
+          this.hydrateLocalCatalog(snap);
+          if (this._localCatalog?.rawSnapshot) {
+            await this.idbWriteSnapshot(this._localCatalog.rawSnapshot);
+          }
+          return true;
+        },
+
+        async refreshCurrentViewSilently() {
+          if (!this._localCatalog) {
+            await this.performSearch(1, true);
+            return;
+          }
+          if (this.currentPage <= 1) {
+            await this.performSearch(1);
+            return;
+          }
+          const pageCount = this.currentPage;
+          const data = this.queryLocalCatalog({
+            query: this.searchQuery,
+            provider: this.selectedProvider,
+            category: this.selectedCategory,
+            limit: pageCount * this.limit,
+            offset: 0,
+            collapseGroups: !this.selectedProvider,
+          });
+          this.products = data.products;
+          this.currentPage = Math.max(1, Math.min(pageCount, Math.ceil(data.products.length / this.limit) || 1));
+          this.applySearchPaginationState(data);
+          this.loading = false;
+        },
+
+        async downloadAndStoreCatalogSnapshot() {
+          if (this._catalogSyncPromise) return this._catalogSyncPromise;
+          this._catalogSyncPromise = (async () => {
+            try {
+              const verRes = await fetch('/api/catalog-version', { cache: 'no-store' });
+              if (!verRes.ok) return;
+              const remote = await verRes.json();
+              await this.fetchAndStoreSnapshot(remote);
+            } catch (e) {
+              // Silencioso si falla la descarga inicial
+            } finally {
+              this._catalogSyncPromise = null;
+            }
+          })();
+          return this._catalogSyncPromise;
+        },
+
+        async syncLocalCatalogInBackground(localVer, localLinksVer) {
+          if (this._catalogSyncPromise) return this._catalogSyncPromise;
+          this._catalogSyncPromise = (async () => {
+            try {
+              const res = await fetch('/api/catalog-version', { cache: 'no-store' });
+              if (!res.ok) return;
+              const remote = await res.json();
+              if (!remote || typeof remote !== 'object') return;
+
+              if (remote.version && remote.version !== localVer) {
+                const updated = await this.fetchAndStoreSnapshot(remote);
+                if (!updated) return;
+                await this.loadProviders();
+                await this.loadCategories();
+                await this.refreshCurrentViewSilently();
+              } else if (remote.linksVersion && remote.linksVersion !== localLinksVer) {
+                const linksRes = await fetch('/api/catalog-links', { cache: 'no-store' });
+                if (!linksRes.ok) return;
+                const linksData = await linksRes.json();
+                const nextLinks = Array.isArray(linksData)
+                  ? linksData
+                  : (Array.isArray(linksData?.links) ? linksData.links : null);
+                if (!nextLinks) return;
+                const nextLinksVer = linksData?.linksVersion || remote.linksVersion;
+                await this.applyUpdatedLocalLinks(nextLinks, nextLinksVer);
+                await this.refreshCurrentViewSilently();
+              }
+            } catch (e) {
+              // Silencioso: conservar snapshot local existente
+            } finally {
+              this._catalogSyncPromise = null;
+            }
+          })();
+          return this._catalogSyncPromise;
         },
 
         setupInfiniteScroll() {
@@ -1431,6 +2064,11 @@
         },
 
         async loadProviders() {
+          if (this._localCatalog) {
+            this.providersSummary = this._localCatalog.providersSummary;
+            this.totalCatalogAll = this.providersSummary.reduce((acc, p) => acc + p.count, 0);
+            return;
+          }
           try {
             const res = await fetch('/api/providers');
             this.providersSummary = await res.json();
@@ -1486,6 +2124,12 @@
         },
 
         async loadCategories() {
+          if (this._localCatalog) {
+            this.categories = this.selectedProvider
+              ? (this._localCatalog.categoriesByProvider.get(this.selectedProvider) || [])
+              : (this._localCatalog.categoriesAll || []);
+            return;
+          }
           try {
             const params = new URLSearchParams();
             if (this.selectedProvider) params.set('provider', this.selectedProvider);
@@ -1496,7 +2140,22 @@
           }
         },
 
-        async performSearch(page = 1, noCache = false) {
+        async performSearch(page = 1, noCache = false, skipLocal = false) {
+          if (this._localCatalog && !skipLocal) {
+            this.currentPage = 1;
+            const data = this.queryLocalCatalog({
+              query: this.searchQuery,
+              provider: this.selectedProvider,
+              category: this.selectedCategory,
+              limit: this.limit,
+              offset: 0,
+              collapseGroups: !this.selectedProvider,
+            });
+            this.products = data.products;
+            this.applySearchPaginationState(data);
+            this.loading = false;
+            return;
+          }
           this.loading = true;
           this.currentPage = 1;
           this.products = [];
@@ -1511,10 +2170,7 @@
             const res = await fetch(`/api/search?${params}`, noCache ? { cache: 'no-store' } : {});
             const data = await res.json();
             this.products = data.products;
-            this.totalResults = data.total;
-            this.exactTotal = data.exactTotal !== false;
-            this.hasMore = Boolean(data.hasMore);
-            this.totalPages = data.hasMore ? (this.currentPage + 1) : (data.exactTotal === false ? this.currentPage : Math.ceil(data.total / this.limit));
+            this.applySearchPaginationState(data);
           } catch (e) {
             console.error('Error en búsqueda', e);
           } finally {
@@ -1522,11 +2178,25 @@
           }
         },
 
-        async loadNextPage() {
+        async loadNextPage(skipLocal = false) {
           if (this.loading || this.loadingMore || this.currentPage >= this.totalPages) return;
           this.loadingMore = true;
           const nextPage = this.currentPage + 1;
           try {
+            if (this._localCatalog && !skipLocal) {
+              const data = this.queryLocalCatalog({
+                query: this.searchQuery,
+                provider: this.selectedProvider,
+                category: this.selectedCategory,
+                limit: this.limit,
+                offset: (nextPage - 1) * this.limit,
+                collapseGroups: !this.selectedProvider,
+              });
+              this.products = [...this.products, ...data.products];
+              this.currentPage = nextPage;
+              this.applySearchPaginationState(data);
+              return;
+            }
             const params = new URLSearchParams({
               q: this.searchQuery,
               provider: this.selectedProvider,
@@ -1538,10 +2208,7 @@
             const data = await res.json();
             this.products = [...this.products, ...data.products];
             this.currentPage = nextPage;
-            this.totalResults = data.total;
-            this.exactTotal = data.exactTotal !== false;
-            this.hasMore = Boolean(data.hasMore);
-            this.totalPages = data.hasMore ? (this.currentPage + 1) : (data.exactTotal === false ? this.currentPage : Math.ceil(data.total / this.limit));
+            this.applySearchPaginationState(data);
           } catch (e) {
             console.error('Error cargando más productos', e);
           } finally {
@@ -1617,12 +2284,25 @@
             this.adminLinkResults = [];
             return;
           }
+          const existingUids = new Set((this.modalProduct?.offers || [{ uid: this.modalProduct?.uid }]).map(o => o.uid));
+          if (this._localCatalog) {
+            const data = this.queryLocalCatalog({
+              query: q,
+              provider: '',
+              category: '',
+              limit: 10,
+              offset: 0,
+              collapseGroups: false,
+            });
+            this.adminLinkResults = (data.products || []).filter(c => !existingUids.has(c.uid));
+            this.adminLinkLoading = false;
+            return;
+          }
           this.adminLinkLoading = true;
           try {
             const params = new URLSearchParams({ q, raw: '1', limit: '10' });
             const res = await fetch(`/api/search?${params}`, { cache: 'no-store' });
             const data = await res.json();
-            const existingUids = new Set((this.modalProduct?.offers || [{ uid: this.modalProduct?.uid }]).map(o => o.uid));
             this.adminLinkResults = (data.products || []).filter(c => !existingUids.has(c.uid));
           } catch (e) {
             console.error('Error buscando candidatos para vincular', e);
@@ -1648,6 +2328,9 @@
             const refreshed = await fetch(`/api/product/${encodeURIComponent(this.modalProduct.uid)}`, { cache: 'no-store' });
             if (refreshed.ok) {
               this.modalProduct = await refreshed.json();
+            }
+            if (this._localCatalog) {
+              await this.refreshLocalLinksFromServer();
             }
             await this.searchAdminLinkCandidates();
             await this.performSearch(1, true);
@@ -1675,6 +2358,9 @@
             const refreshed = await fetch(`/api/product/${encodeURIComponent(keepUid)}`, { cache: 'no-store' });
             if (refreshed.ok) {
               this.modalProduct = await refreshed.json();
+            }
+            if (this._localCatalog) {
+              await this.refreshLocalLinksFromServer();
             }
             await this.performSearch(1, true);
             await this.loadCartOptimization();

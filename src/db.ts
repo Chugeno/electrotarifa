@@ -82,8 +82,7 @@ function setCatalogCache(key: string, val: any): void {
   }
 }
 
-export function formatProduct(p: any): Product {
-  const { images_json, categories_json, attributes_json, variations_json, ...rest } = p;
+function normalizePricing(p: any) {
   const price = Number(p.price || 0);
   const ivaRate = Number(p.iva_rate || 21);
   let priceNeto = Number(p.price_neto || 0);
@@ -97,11 +96,18 @@ export function formatProduct(p: any): Product {
   }
 
   return {
-    ...rest,
     price,
     price_neto: priceNeto,
     iva_rate: ivaRate,
     iva_amount: ivaAmount,
+  };
+}
+
+export function formatProduct(p: any): Product {
+  const { images_json, categories_json, attributes_json, variations_json, ...rest } = p;
+  return {
+    ...rest,
+    ...normalizePricing(p),
     images: images_json ? JSON.parse(images_json) : [],
     categories: categories_json ? JSON.parse(categories_json) : [],
     attributes: attributes_json ? JSON.parse(attributes_json) : [],
@@ -450,6 +456,74 @@ export async function unlinkProduct(uid: string) {
   });
   clearCatalogCache();
   return { success: true };
+}
+
+export async function getAllActiveLinks(): Promise<
+  Array<{ uid: string; group_key: string; source: string }>
+> {
+  try {
+    const res = await client.execute(
+      "SELECT uid, group_key, source FROM product_links WHERE source != 'unlinked'"
+    );
+    return res.rows.map((r: any) => ({
+      uid: String(r.uid),
+      group_key: String(r.group_key),
+      source: String(r.source || "auto"),
+    }));
+  } catch (e) {
+    return [];
+  }
+}
+
+export async function getCatalogVersion(): Promise<{
+  version: string;
+  linksVersion: string;
+  count: number;
+}> {
+  const prodPromise = client.execute(
+    "SELECT COUNT(*) as cnt, MAX(updated_at) as max_upd FROM products"
+  );
+  const linkPromise = (async () => {
+    try {
+      return await client.execute("SELECT MAX(updated_at) as max_link_upd FROM product_links");
+    } catch (e) {
+      return null;
+    }
+  })();
+
+  const [prodRes, linkRes] = await Promise.all([prodPromise, linkPromise]);
+  const cnt = prodRes.rows[0]?.cnt;
+  const max_upd = prodRes.rows[0]?.max_upd;
+  const max_link_upd = linkRes?.rows[0]?.max_link_upd;
+  const fallback = new Date().toISOString();
+
+  return {
+    version: String(max_upd || fallback),
+    linksVersion: String(max_link_upd || max_upd || fallback),
+    count: Number(cnt || 0),
+  };
+}
+
+export async function buildCatalogSnapshot() {
+  const [prodRes, links, ver] = await Promise.all([
+    client.execute(
+      `SELECT ${SEARCH_COLS} FROM products p ORDER BY (p.price > 0) DESC, p.is_in_stock DESC, p.price ASC`
+    ),
+    getAllActiveLinks(),
+    getCatalogVersion(),
+  ]);
+
+  const products: Product[] = prodRes.rows.map((row: any) => ({
+    ...row,
+    ...normalizePricing(row),
+  }));
+
+  return {
+    version: ver.version,
+    linksVersion: ver.linksVersion,
+    products,
+    links,
+  };
 }
 
 export async function analyzeCartOptimization(cartId: number) {

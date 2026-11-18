@@ -11,7 +11,8 @@
     "test": "tsx --test tests/system.test.ts",
     "deploy": "wrangler deploy",
     "sync": "tsx scripts/sync-to-turso.ts",
-    "sync:full": "tsx scripts/sync-to-turso.ts --full"
+    "sync:full": "tsx scripts/sync-to-turso.ts --full",
+    "publish:r2": "tsx scripts/publish-catalog-r2.ts"
   },
   "keywords": [],
   "author": "",

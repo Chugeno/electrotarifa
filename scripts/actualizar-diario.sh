@@ -6,4 +6,5 @@ echo "=== $(date '+%F %T') Inicio actualización ==="
 python3 scraper.py --provider all
 python3 auto_link.py
 npx tsx scripts/sync-to-turso.ts
+npx tsx scripts/publish-catalog-r2.ts
 echo "=== $(date '+%F %T') Fin ==="
