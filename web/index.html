@@ -286,7 +286,7 @@
         </template>
         <template x-if="!loading">
           <span>
-            Mostrando <strong class="text-slate-700" x-text="products.length"></strong> de <strong class="text-slate-700" x-text="totalResults.toLocaleString('es-AR')"></strong> productos
+            Mostrando <strong class="text-slate-700" x-text="products.length"></strong> de <strong class="text-slate-700" x-text="exactTotal ? totalResults.toLocaleString('es-AR') : (products.length + '+')"></strong> productos
             <span x-show="selectedProvider"> en <strong class="text-slate-800" x-text="selectedProvider"></strong></span>
             <span x-show="searchQuery"> para "<strong class="text-slate-800" x-text="searchQuery"></strong>"</span>
           </span>
@@ -1193,6 +1193,8 @@
         categories: [],
         providersSummary: [],
         totalResults: 0,
+        exactTotal: true,
+        hasMore: false,
         totalCatalogAll: 7486,
         currentPage: 1,
         totalPages: 1,
@@ -1262,11 +1264,12 @@
             window.history.replaceState({}, '', window.location.pathname);
           }
 
-          await this.checkSession();
-          await this.loadProviders();
-          await this.loadCategories();
-          await this.loadCarts();
-          await this.performSearch(1);
+          await Promise.all([
+            this.performSearch(1),
+            this.loadProviders(),
+            this.loadCategories(),
+            this.checkSession().then(() => this.loadCarts()),
+          ]);
 
           // Escuchar scroll para el botón flotante "Volver arriba"
           window.addEventListener('scroll', () => {
@@ -1476,8 +1479,10 @@
 
         async setProvider(name) {
           this.selectedProvider = name;
-          await this.loadCategories();
-          await this.performSearch(1);
+          await Promise.all([
+            this.loadCategories(),
+            this.performSearch(1),
+          ]);
         },
 
         async loadCategories() {
@@ -1491,7 +1496,7 @@
           }
         },
 
-        async performSearch(page = 1) {
+        async performSearch(page = 1, noCache = false) {
           this.loading = true;
           this.currentPage = 1;
           this.products = [];
@@ -1503,11 +1508,13 @@
               page: 1,
               limit: this.limit
             });
-            const res = await fetch(`/api/search?${params}`);
+            const res = await fetch(`/api/search?${params}`, noCache ? { cache: 'no-store' } : {});
             const data = await res.json();
             this.products = data.products;
             this.totalResults = data.total;
-            this.totalPages = Math.ceil(data.total / this.limit);
+            this.exactTotal = data.exactTotal !== false;
+            this.hasMore = Boolean(data.hasMore);
+            this.totalPages = data.hasMore ? (this.currentPage + 1) : (data.exactTotal === false ? this.currentPage : Math.ceil(data.total / this.limit));
           } catch (e) {
             console.error('Error en búsqueda', e);
           } finally {
@@ -1532,7 +1539,9 @@
             this.products = [...this.products, ...data.products];
             this.currentPage = nextPage;
             this.totalResults = data.total;
-            this.totalPages = Math.ceil(data.total / this.limit);
+            this.exactTotal = data.exactTotal !== false;
+            this.hasMore = Boolean(data.hasMore);
+            this.totalPages = data.hasMore ? (this.currentPage + 1) : (data.exactTotal === false ? this.currentPage : Math.ceil(data.total / this.limit));
           } catch (e) {
             console.error('Error cargando más productos', e);
           } finally {
@@ -1560,6 +1569,17 @@
             this.modalSelectedPrice = p.price;
           }
           this.modalOpen = true;
+          if (p?.uid && p.description === undefined) {
+            fetch(`/api/product/${encodeURIComponent(p.uid)}`)
+              .then(r => r.ok ? r.json() : null)
+              .then(full => {
+                if (full && this.modalProduct?.uid === p.uid) {
+                  this.modalProduct = full;
+                  if (!this.modalActiveImage) this.modalActiveImage = full.image_url;
+                }
+              })
+              .catch(() => {});
+          }
         },
 
         async switchModalToOffer(uid) {
@@ -1600,7 +1620,7 @@
           this.adminLinkLoading = true;
           try {
             const params = new URLSearchParams({ q, raw: '1', limit: '10' });
-            const res = await fetch(`/api/search?${params}`);
+            const res = await fetch(`/api/search?${params}`, { cache: 'no-store' });
             const data = await res.json();
             const existingUids = new Set((this.modalProduct?.offers || [{ uid: this.modalProduct?.uid }]).map(o => o.uid));
             this.adminLinkResults = (data.products || []).filter(c => !existingUids.has(c.uid));
@@ -1625,12 +1645,12 @@
               return alert(err.error || 'Error al vincular');
             }
             this.showToast('Productos vinculados para toda la app', '🔗');
-            const refreshed = await fetch(`/api/product/${encodeURIComponent(this.modalProduct.uid)}`);
+            const refreshed = await fetch(`/api/product/${encodeURIComponent(this.modalProduct.uid)}`, { cache: 'no-store' });
             if (refreshed.ok) {
               this.modalProduct = await refreshed.json();
             }
             await this.searchAdminLinkCandidates();
-            await this.performSearch(1);
+            await this.performSearch(1, true);
             await this.loadCartOptimization();
           } catch (e) {
             alert('No se pudo vincular el producto');
@@ -1652,11 +1672,11 @@
             const keepUid = uid === this.modalProduct?.uid
               ? (this.modalProduct?.offers?.find(o => o.uid !== uid)?.uid || uid)
               : this.modalProduct?.uid;
-            const refreshed = await fetch(`/api/product/${encodeURIComponent(keepUid)}`);
+            const refreshed = await fetch(`/api/product/${encodeURIComponent(keepUid)}`, { cache: 'no-store' });
             if (refreshed.ok) {
               this.modalProduct = await refreshed.json();
             }
-            await this.performSearch(1);
+            await this.performSearch(1, true);
             await this.loadCartOptimization();
           } catch (e) {
             alert('No se pudo desvincular el producto');

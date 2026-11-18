@@ -59,6 +59,9 @@ def init_db(db_path: str = DB_PATH) -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_products_sku ON products(sku)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_products_price ON products(price)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_products_type ON products(type)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_products_sort ON products((price > 0) DESC, is_in_stock DESC, price ASC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_products_provider_sort ON products(provider, (price > 0) DESC, is_in_stock DESC, price ASC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_products_cats ON products(categories_text, provider)")
 
         # Migración segura de columnas adicionales
         for col, typedef in [("price_neto", "REAL DEFAULT 0.0"), ("iva_rate", "REAL DEFAULT 21.0"), ("iva_amount", "REAL DEFAULT 0.0")]:

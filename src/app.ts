@@ -52,6 +52,10 @@ app.get("/api/search", async (c) => {
   const offset = (page - 1) * limit;
 
   const res = await db.searchProducts(query, provider, category, limit, offset, !provider && !raw);
+  c.header(
+    "Cache-Control",
+    raw ? "no-store" : "public, max-age=0, s-maxage=120, stale-while-revalidate=300"
+  );
   return c.json({
     ...res,
     page,
@@ -91,6 +95,7 @@ app.post("/api/admin/unlink", async (c) => {
 // API: Providers summary
 app.get("/api/providers", async (c) => {
   const summary = await db.getProvidersSummary();
+  c.header("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
   return c.json(summary);
 });
 
@@ -98,6 +103,7 @@ app.get("/api/providers", async (c) => {
 app.get("/api/categories", async (c) => {
   const provider = c.req.query("provider") || "";
   const cats = await db.getCategories(provider);
+  c.header("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
   return c.json(cats);
 });
 

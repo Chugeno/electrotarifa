@@ -80,6 +80,13 @@ async function main() {
   console.log("🔍 Reconstruyendo índice FTS5 en Turso…");
   await remote.execute("INSERT INTO products_fts(products_fts) VALUES('rebuild')");
 
+  console.log("⚡ Asegurando índices de ordenamiento y categorías en Turso…");
+  await remote.batch([
+    "CREATE INDEX IF NOT EXISTS idx_products_sort ON products((price > 0) DESC, is_in_stock DESC, price ASC)",
+    "CREATE INDEX IF NOT EXISTS idx_products_provider_sort ON products(provider, (price > 0) DESC, is_in_stock DESC, price ASC)",
+    "CREATE INDEX IF NOT EXISTS idx_products_cats ON products(categories_text, provider)",
+  ], "write");
+
   console.log("🔗 Sincronizando vínculos de productos (product_links)…");
   await remote.execute(`
     CREATE TABLE IF NOT EXISTS product_links (

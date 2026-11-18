@@ -19,13 +19,13 @@ export interface Product {
   price_range_max?: number;
   permalink: string;
   image_url: string;
-  images_json: string;
+  images_json?: string;
   categories_text: string;
-  categories_json: string;
-  attributes_json: string;
-  variations_json: string;
-  short_description: string;
-  description: string;
+  categories_json?: string;
+  attributes_json?: string;
+  variations_json?: string;
+  short_description?: string;
+  description?: string;
   is_in_stock: number;
   images?: any[];
   categories?: any[];
@@ -50,7 +50,40 @@ export interface Product {
   }>;
 }
 
+const SEARCH_COLS =
+  "p.uid, p.provider, p.id, p.sku, p.name, p.brand, p.slug, p.type, p.price, p.price_neto, p.iva_rate, p.iva_amount, p.regular_price, p.sale_price, p.price_range_min, p.price_range_max, p.permalink, p.image_url, p.categories_text, p.variations_json, p.is_in_stock";
+
+const CATALOG_CACHE_TTL_MS = 180_000;
+const CATALOG_CACHE_MAX = 200;
+const catalogCache = new Map<string, { exp: number; val: any }>();
+
+export function clearCatalogCache(): void {
+  catalogCache.clear();
+}
+
+function getCatalogCache<T>(key: string): T | undefined {
+  const entry = catalogCache.get(key);
+  if (!entry) return undefined;
+  if (Date.now() >= entry.exp) {
+    catalogCache.delete(key);
+    return undefined;
+  }
+  return entry.val as T;
+}
+
+function setCatalogCache(key: string, val: any): void {
+  if (catalogCache.has(key)) {
+    catalogCache.delete(key);
+  }
+  catalogCache.set(key, { exp: Date.now() + CATALOG_CACHE_TTL_MS, val });
+  if (catalogCache.size > CATALOG_CACHE_MAX) {
+    const oldest = catalogCache.keys().next().value;
+    if (oldest !== undefined) catalogCache.delete(oldest);
+  }
+}
+
 export function formatProduct(p: any): Product {
+  const { images_json, categories_json, attributes_json, variations_json, ...rest } = p;
   const price = Number(p.price || 0);
   const ivaRate = Number(p.iva_rate || 21);
   let priceNeto = Number(p.price_neto || 0);
@@ -64,15 +97,15 @@ export function formatProduct(p: any): Product {
   }
 
   return {
-    ...p,
+    ...rest,
     price,
     price_neto: priceNeto,
     iva_rate: ivaRate,
     iva_amount: ivaAmount,
-    images: p.images_json ? JSON.parse(p.images_json) : [],
-    categories: p.categories_json ? JSON.parse(p.categories_json) : [],
-    attributes: p.attributes_json ? JSON.parse(p.attributes_json) : [],
-    variations: p.variations_json ? JSON.parse(p.variations_json) : [],
+    images: images_json ? JSON.parse(images_json) : [],
+    categories: categories_json ? JSON.parse(categories_json) : [],
+    attributes: attributes_json ? JSON.parse(attributes_json) : [],
+    variations: variations_json ? JSON.parse(variations_json) : [],
   };
 }
 
@@ -84,22 +117,13 @@ export async function searchProducts(
   offset = 0,
   collapseGroups = !provider
 ) {
+  const cacheKey = `search:${JSON.stringify([query, provider, category, limit, offset, collapseGroups])}`;
+  const cached = getCatalogCache<{ total: number; products: Product[] }>(cacheKey);
+  if (cached) return cached;
+
   const cleanedQ = query.trim();
-  const exactSkuProds: Product[] = [];
 
   if (cleanedQ) {
-    // 1. Prioritize Exact SKU match
-    let skuSql = "SELECT * FROM products WHERE sku = ?";
-    const skuParams: any[] = [cleanedQ];
-    if (provider) {
-      skuSql += " AND provider = ?";
-      skuParams.push(provider);
-    }
-    const skuRes = await client.execute({ sql: skuSql, args: skuParams });
-    for (const row of skuRes.rows) {
-      exactSkuProds.push(formatProduct(row));
-    }
-
     const tokens = cleanedQ
       .split(/\s+/)
       .map((t) => t.replace(/["'*]/g, "").trim())
@@ -107,135 +131,148 @@ export async function searchProducts(
 
     const canUseFts = tokens.length > 0 && tokens.every((t) => t.length >= 3);
 
+    let fromWhere: string;
+    const baseParams: any[] = [];
+
     if (canUseFts) {
       const ftsQuery = tokens.map((t) => `"${t}"`).join(" AND ");
-      let sql = `
-        SELECT p.*
+      fromWhere = `
         FROM products p
         JOIN products_fts fts ON p.rowid = fts.rowid
         WHERE products_fts MATCH ?
       `;
-      const params: any[] = [ftsQuery];
-      if (provider) {
-        sql += " AND p.provider = ?";
-        params.push(provider);
-      }
-      if (category) {
-        sql += " AND p.categories_text LIKE ?";
-        params.push(`%${category}%`);
-      }
-
-      const countSql = `SELECT COUNT(*) as cnt FROM (${sql})`;
-      const countRes = await client.execute({ sql: countSql, args: params });
-      const total = Number(countRes.rows[0]?.cnt || 0);
-
-      sql += " ORDER BY (p.price > 0) DESC, p.is_in_stock DESC, p.price ASC LIMIT ? OFFSET ?";
-      params.push(limit, offset);
-      const rowsRes = await client.execute({ sql, args: params });
-
-      const products: Product[] = [];
-      const seenUids = new Set<string>();
-
-      if (offset === 0 && exactSkuProds.length > 0) {
-        for (const p of exactSkuProds) {
-          products.push(p);
-          seenUids.add(p.uid);
-        }
-      }
-
-      for (const row of rowsRes.rows) {
-        const prod = formatProduct(row);
-        if (!seenUids.has(prod.uid)) {
-          products.push(prod);
-          seenUids.add(prod.uid);
-        }
-      }
-
-      const enriched = await enrichAndConsolidateProducts(products.slice(0, limit), collapseGroups);
-      return { total: Math.max(total, enriched.length), products: enriched };
+      baseParams.push(ftsQuery);
     } else {
       // Fallback for short words
-      let sql = "SELECT p.* FROM products p WHERE 1=1";
-      const params: any[] = [];
+      fromWhere = "FROM products p WHERE 1=1";
       for (const t of tokens) {
-        sql += " AND (p.name LIKE ? OR p.sku LIKE ? OR p.brand LIKE ? OR p.categories_text LIKE ?)";
-        params.push(`%${t}%`, `%${t}%`, `%${t}%`, `%${t}%`);
+        fromWhere += " AND (p.name LIKE ? OR p.sku LIKE ? OR p.brand LIKE ? OR p.categories_text LIKE ?)";
+        baseParams.push(`%${t}%`, `%${t}%`, `%${t}%`, `%${t}%`);
       }
+    }
+
+    if (provider) {
+      fromWhere += " AND p.provider = ?";
+      baseParams.push(provider);
+    }
+    if (category) {
+      fromWhere += " AND p.categories_text LIKE ?";
+      baseParams.push(`%${category}%`);
+    }
+
+    const rowsSql = `SELECT ${SEARCH_COLS} ${fromWhere} ORDER BY (p.price > 0) DESC, p.is_in_stock DESC, p.price ASC LIMIT ? OFFSET ?`;
+
+    // 1. Prioritize Exact SKU match (only needed for first page)
+    const skuPromise = (() => {
+      if (offset !== 0) return Promise.resolve(null);
+      let skuSql = `SELECT ${SEARCH_COLS} FROM products p WHERE p.sku = ?`;
+      const skuParams: any[] = [cleanedQ];
       if (provider) {
-        sql += " AND p.provider = ?";
-        params.push(provider);
+        skuSql += " AND p.provider = ?";
+        skuParams.push(provider);
       }
-      if (category) {
-        sql += " AND p.categories_text LIKE ?";
-        params.push(`%${category}%`);
-      }
+      return client.execute({ sql: skuSql, args: skuParams });
+    })();
 
-      const countSql = `SELECT COUNT(*) as cnt FROM (${sql})`;
-      const countRes = await client.execute({ sql: countSql, args: params });
-      const total = Number(countRes.rows[0]?.cnt || 0);
+    const [skuRes, rowsRes] = await Promise.all([
+      skuPromise,
+      client.execute({ sql: rowsSql, args: [...baseParams, limit + 1, offset] }),
+    ]);
 
-      sql += " ORDER BY (p.price > 0) DESC, p.is_in_stock DESC, p.price ASC LIMIT ? OFFSET ?";
-      params.push(limit, offset);
-      const rowsRes = await client.execute({ sql, args: params });
+    const hasMore = rowsRes.rows.length > limit;
+    const pageRows = hasMore ? rowsRes.rows.slice(0, limit) : rowsRes.rows;
+    const products: Product[] = [];
+    const seenUids = new Set<string>();
 
-      const products: Product[] = [];
-      const seenUids = new Set<string>();
-
-      if (offset === 0 && exactSkuProds.length > 0) {
-        for (const p of exactSkuProds) {
-          products.push(p);
-          seenUids.add(p.uid);
-        }
-      }
-
-      for (const row of rowsRes.rows) {
+    if (skuRes) {
+      for (const row of skuRes.rows) {
         const prod = formatProduct(row);
         if (!seenUids.has(prod.uid)) {
           products.push(prod);
           seenUids.add(prod.uid);
         }
       }
-
-      const enriched = await enrichAndConsolidateProducts(products.slice(0, limit), collapseGroups);
-      return { total: Math.max(total, enriched.length), products: enriched };
     }
+
+    for (const row of pageRows) {
+      const prod = formatProduct(row);
+      if (!seenUids.has(prod.uid)) {
+        products.push(prod);
+        seenUids.add(prod.uid);
+      }
+    }
+
+    const enriched = await enrichAndConsolidateProducts(products.slice(0, limit), collapseGroups);
+    const total = hasMore ? offset + limit + 1 : offset + enriched.length;
+    const result = { total, exactTotal: !hasMore, hasMore, products: enriched };
+    if (result.products.length > 0) setCatalogCache(cacheKey, result);
+    return result;
   } else {
-    let sql = "SELECT * FROM products WHERE 1=1";
-    const params: any[] = [];
+    let fromWhere = "FROM products p WHERE 1=1";
+    const baseParams: any[] = [];
     if (provider) {
-      sql += " AND provider = ?";
-      params.push(provider);
+      fromWhere += " AND p.provider = ?";
+      baseParams.push(provider);
     }
     if (category) {
-      sql += " AND categories_text LIKE ?";
-      params.push(`%${category}%`);
+      fromWhere += " AND p.categories_text LIKE ?";
+      baseParams.push(`%${category}%`);
     }
 
-    const countSql = `SELECT COUNT(*) as cnt FROM (${sql})`;
-    const countRes = await client.execute({ sql: countSql, args: params });
-    const total = Number(countRes.rows[0]?.cnt || 0);
+    const rowsSql = `SELECT ${SEARCH_COLS} ${fromWhere} ORDER BY (p.price > 0) DESC, p.is_in_stock DESC, p.price ASC LIMIT ? OFFSET ?`;
 
-    sql += " ORDER BY (price > 0) DESC, is_in_stock DESC, price ASC LIMIT ? OFFSET ?";
-    params.push(limit, offset);
-    const rowsRes = await client.execute({ sql, args: params });
+    if (!category) {
+      const countSql = provider
+        ? "SELECT COUNT(*) as cnt FROM products WHERE provider = ?"
+        : "SELECT COUNT(*) as cnt FROM products";
+      const countArgs = provider ? [provider] : [];
 
-    const products = await enrichAndConsolidateProducts(rowsRes.rows.map(formatProduct), collapseGroups);
-    return { total, products };
+      const [countRes, rowsRes] = await Promise.all([
+        client.execute({ sql: countSql, args: countArgs }),
+        client.execute({ sql: rowsSql, args: [...baseParams, limit, offset] }),
+      ]);
+
+      const total = Number(countRes.rows[0]?.cnt || 0);
+      const products = await enrichAndConsolidateProducts(rowsRes.rows.map(formatProduct), collapseGroups);
+      const hasMore = offset + rowsRes.rows.length < total;
+      const result = { total, exactTotal: true, hasMore, products };
+      if (result.products.length > 0) setCatalogCache(cacheKey, result);
+      return result;
+    } else {
+      const rowsRes = await client.execute({ sql: rowsSql, args: [...baseParams, limit + 1, offset] });
+      const hasMore = rowsRes.rows.length > limit;
+      const pageRows = hasMore ? rowsRes.rows.slice(0, limit) : rowsRes.rows;
+      const products = await enrichAndConsolidateProducts(pageRows.map(formatProduct), collapseGroups);
+      const total = hasMore ? offset + limit + 1 : offset + products.length;
+      const result = { total, exactTotal: !hasMore, hasMore, products };
+      if (result.products.length > 0) setCatalogCache(cacheKey, result);
+      return result;
+    }
   }
 }
 
 export async function getProvidersSummary() {
+  const cacheKey = "providers";
+  const cached = getCatalogCache<Array<{ provider: string; count: number }>>(cacheKey);
+  if (cached) return cached;
+
   const res = await client.execute(
     "SELECT provider, COUNT(*) as count FROM products GROUP BY provider ORDER BY count DESC"
   );
-  return res.rows.map((r: any) => ({
+  const result = res.rows.map((r: any) => ({
     provider: String(r.provider),
     count: Number(r.count),
   }));
+  if (result.length > 0) setCatalogCache(cacheKey, result);
+  return result;
 }
 
 export async function getCategories(provider = "") {
-  let sql = "SELECT categories_text FROM products WHERE categories_text != ''";
+  const cacheKey = `categories:${provider}`;
+  const cached = getCatalogCache<string[]>(cacheKey);
+  if (cached) return cached;
+
+  let sql = "SELECT DISTINCT categories_text FROM products WHERE categories_text != ''";
   const params: any[] = [];
   if (provider) {
     sql += " AND provider = ?";
@@ -250,7 +287,9 @@ export async function getCategories(provider = "") {
       if (clean) cats.add(clean);
     }
   }
-  return Array.from(cats).sort();
+  const result = Array.from(cats).sort();
+  if (result.length > 0) setCatalogCache(cacheKey, result);
+  return result;
 }
 
 export async function getProductByUid(uid: string) {
@@ -270,37 +309,26 @@ export async function enrichAndConsolidateProducts(products: Product[], collapse
   try {
     const uids = products.map((p) => p.uid);
     const placeholders = uids.map(() => "?").join(",");
-    const linkRes = await client.execute({
-      sql: `SELECT uid, group_key, source FROM product_links WHERE uid IN (${placeholders}) AND source != 'unlinked'`,
-      args: uids,
-    });
-    if (linkRes.rows.length === 0) return products;
-
-    const uidToGroup = new Map<string, string>();
-    const groupKeys = new Set<string>();
-    for (const r of linkRes.rows) {
-      const gk = String(r.group_key);
-      uidToGroup.set(String(r.uid), gk);
-      groupKeys.add(gk);
-    }
-
-    const gkArr = Array.from(groupKeys);
-    const gkPh = gkArr.map(() => "?").join(",");
     const sibRes = await client.execute({
       sql: `
-        SELECT p.*, pl.group_key, pl.source as link_source
-        FROM products p
-        JOIN product_links pl ON p.uid = pl.uid
-        WHERE pl.group_key IN (${gkPh}) AND pl.source != 'unlinked'
+        SELECT ${SEARCH_COLS}, pl.group_key, pl.source as link_source
+        FROM product_links pl
+        JOIN products p ON p.uid = pl.uid
+        WHERE pl.group_key IN (
+          SELECT group_key FROM product_links WHERE uid IN (${placeholders}) AND source != 'unlinked'
+        ) AND pl.source != 'unlinked'
       `,
-      args: gkArr,
+      args: uids,
     });
+    if (sibRes.rows.length === 0) return products;
 
+    const uidToGroup = new Map<string, string>();
     const byGroup = new Map<string, Array<Product & { link_source?: string }>>();
     for (const row of sibRes.rows) {
       const fp = formatProduct(row) as Product & { link_source?: string };
       fp.link_source = String(row.link_source || "auto");
       const gk = String(row.group_key);
+      uidToGroup.set(String(row.uid), gk);
       if (!byGroup.has(gk)) byGroup.set(gk, []);
       byGroup.get(gk)!.push(fp);
     }
@@ -327,8 +355,8 @@ export async function enrichAndConsolidateProducts(products: Product[], collapse
         out.push(p);
         continue;
       }
-      const siblings = byGroup.get(gk) || [p];
-      if (siblings.length <= 1) {
+      const siblings = byGroup.get(gk);
+      if (!siblings || siblings.length <= 1) {
         out.push(p);
         continue;
       }
@@ -410,6 +438,7 @@ export async function linkProducts(uidA: string, uidB: string) {
     });
   }
   await client.batch(stmts, "write");
+  clearCatalogCache();
   return { success: true, group_key: targetGroup };
 }
 
@@ -419,6 +448,7 @@ export async function unlinkProduct(uid: string) {
     sql: "INSERT OR REPLACE INTO product_links (uid, group_key, source, updated_at) VALUES (?, ?, 'unlinked', CURRENT_TIMESTAMP)",
     args: [uid, `unlinked_${uid}`],
   });
+  clearCatalogCache();
   return { success: true };
 }
 
