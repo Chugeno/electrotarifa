@@ -79,7 +79,12 @@ function normalizeProduct(r: Record<string, unknown>): NormalizedProduct {
   };
 }
 
-function putR2Object(key: string, filePath: string, contentType: string, contentEncoding?: string): void {
+async function putR2Object(
+  key: string,
+  filePath: string,
+  contentType: string,
+  contentEncoding?: string
+): Promise<void> {
   const args = [
     "wrangler",
     "r2",
@@ -95,7 +100,23 @@ function putR2Object(key: string, filePath: string, contentType: string, content
     args.push("--content-encoding", contentEncoding);
   }
   args.push("--remote");
-  execFileSync("npx", args, { stdio: "inherit" });
+
+  const maxAttempts = 3;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      execFileSync("npx", args, { stdio: "inherit" });
+      return;
+    } catch (err: any) {
+      if (attempt >= maxAttempts) {
+        throw err;
+      }
+      const delayMs = 3000 * Math.pow(2, attempt - 1);
+      console.warn(
+        `⚠️  [R2 ${key}] intento ${attempt}/${maxAttempts} falló (${err?.message || err}). Reintentando en ${delayMs}ms…`
+      );
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
 }
 
 async function main() {
@@ -150,9 +171,9 @@ async function main() {
       `☁️  Subiendo a R2 (${BUCKET}) — ${products.length} productos, ${links.length} links, ${gzMb} MB gzip…`
     );
 
-    putR2Object("catalog.json.gz", catalogPath, "application/json", "gzip");
-    putR2Object("links.json", linksPath, "application/json");
-    putR2Object("version.json", versionPath, "application/json");
+    await putR2Object("catalog.json.gz", catalogPath, "application/json", "gzip");
+    await putR2Object("links.json", linksPath, "application/json");
+    await putR2Object("version.json", versionPath, "application/json");
 
     console.log(
       `✅ Publicado en R2 en ${((Date.now() - t0) / 1000).toFixed(1)}s — productos: ${products.length}, links: ${links.length}, tamaño comprimido: ${gzMb} MB`
